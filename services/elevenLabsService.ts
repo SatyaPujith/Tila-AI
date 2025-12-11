@@ -1,7 +1,7 @@
 // ElevenLabs Conversational AI Service
-const ELEVENLABS_API_KEY = (import.meta as any).env?.VITE_ELEVENLABS_API_KEY || 'sk_cca085302eaeda54115f0931dbfe426961b408a756e30d28';
-const AGENT_ID = (import.meta as any).env?.VITE_ELEVENLABS_AGENT_ID || 'agent_9801kc0efv89e7fv850gtsk8k05g';
-const VOICE_ID = 'pNInz6obpgDQGcFmaJgB';
+const ELEVENLABS_API_KEY = (import.meta as any).env?.VITE_ELEVENLABS_API_KEY || '';
+const AGENT_ID = (import.meta as any).env?.VITE_ELEVENLABS_AGENT_ID || '';
+const VOICE_ID = (import.meta as any).env?.VITE_ELEVENLABS_VOICE_ID || 'pNInz6obpgDQGcFmaJgB';
 
 // Get the agent ID for embedding
 export const getAgentId = () => AGENT_ID;
