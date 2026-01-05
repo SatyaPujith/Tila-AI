@@ -96,7 +96,7 @@ router.post('/:userId/log-problem', authMiddleware, async (req, res) => {
 router.get('/leaderboard/top', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 10;
-    const users = await User.find()
+    const users = await User.find({ impactScore: { $gt: 0 } })
       .sort({ impactScore: -1 })
       .limit(limit)
       .select('name rank impactScore problemsSolvedEasy problemsSolvedMedium problemsSolvedHard _id');
