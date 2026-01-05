@@ -186,4 +186,61 @@ router.get('/admin/all-scores', async (req, res) => {
   }
 });
 
+// Get public profile by username and share code (no auth required)
+// If no share code provided, only show basic public info
+router.get('/public/:username/:shareCode?', async (req, res) => {
+  try {
+    const { username, shareCode } = req.params;
+    
+    const user = await User.findOne({ name: username });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // If share code is provided, verify it matches
+    if (shareCode && shareCode !== user.shareCode) {
+      return res.status(403).json({ error: 'Invalid share code' });
+    }
+
+    // Calculate impact score
+    const impactScore = (user.problemsSolvedEasy * 10) + (user.problemsSolvedMedium * 30) + (user.problemsSolvedHard * 60);
+    
+    // Get leaderboard position
+    const totalUsers = await User.countDocuments({ impactScore: { $gt: 0 } });
+    const usersWithHigherScore = await User.countDocuments({ impactScore: { $gt: impactScore } });
+    const rank = usersWithHigherScore + 1;
+    const percentile = Math.round(((totalUsers - usersWithHigherScore) / totalUsers) * 100);
+
+    // Convert problemsPerDay Map to object for JSON serialization
+    const problemsPerDay = {};
+    if (user.problemsPerDay && user.problemsPerDay.size > 0) {
+      user.problemsPerDay.forEach((value, key) => {
+        problemsPerDay[key] = value;
+      });
+    }
+
+    res.json({
+      id: user._id,
+      name: user.name,
+      rank: user.rank,
+      streak: user.streak,
+      xp: user.xp,
+      impactScore,
+      problemsSolvedEasy: user.problemsSolvedEasy,
+      problemsSolvedMedium: user.problemsSolvedMedium,
+      problemsSolvedHard: user.problemsSolvedHard,
+      totalProblemsSolved: user.problemsSolvedEasy + user.problemsSolvedMedium + user.problemsSolvedHard,
+      problemsPerDay,
+      leaderboardRank: rank,
+      leaderboardPercentile: percentile,
+      lastSolvedDate: user.lastSolvedDate,
+      createdAt: user.createdAt,
+      shareCode: user.shareCode
+    });
+  } catch (error) {
+    console.error('Error fetching public profile:', error);
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
 export default router;
