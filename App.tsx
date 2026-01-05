@@ -3,6 +3,7 @@ import { Sidebar } from './components/Sidebar';
 import { ChatArea } from './components/ChatArea';
 import { SnippetsLibrary, FilesLibrary } from './components/Notebook';
 import { ProfilePage } from './components/ProfilePage';
+import { PublicProfilePage } from './components/PublicProfilePage';
 import { AppMode, CodeSnippet, Message, MessageRole, StudyFile, ViewState, AuthStage, User, ExplanationStyle, CodingChallenge, GraphData, ProgrammingLanguage, Project, CallStatus, CommunityPost, ExecutionMode } from './types';
 import { generateDevResponse, generateCodingChallenges, generateRoadmapData, runCodeSimulation, generateSyllabusContent, convertCodeLanguage, validateChallengeSolution } from './services/geminiService';
 import { decodeAudioData, playAudioBuffer } from './services/audioUtils';
@@ -1279,6 +1280,10 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   
+  // Public Profile Viewing
+  const [publicProfileUsername, setPublicProfileUsername] = useState<string | null>(null);
+  const [publicProfileShareCode, setPublicProfileShareCode] = useState<string | null>(null);
+  
   // Project Management
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -1297,6 +1302,18 @@ export default function App() {
   const [userRoadmaps, setUserRoadmaps] = useState<any[]>([]);
   const [roadmapsLoading, setRoadmapsLoading] = useState(false);
   
+  // Detect public profile URL on mount
+  useEffect(() => {
+    const path = window.location.pathname;
+    console.log('[App] Current pathname:', path);
+    const profileMatch = path.match(/^\/profile\/([^/]+)\/(.+)$/);
+    if (profileMatch) {
+      const [, username, shareCode] = profileMatch;
+      console.log('[App] Detected public profile URL - username:', username, 'shareCode:', shareCode);
+      setPublicProfileUsername(decodeURIComponent(username));
+      setPublicProfileShareCode(decodeURIComponent(shareCode));
+    }
+  }, []);
   // Chat History Management
   const [chatSessions, setChatSessions] = useState<any[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
@@ -3402,6 +3419,21 @@ public:
   };
 
   // --- RENDER ---
+
+  // Show public profile if URL matches pattern
+  if (publicProfileUsername && publicProfileShareCode) {
+    return (
+      <PublicProfilePage 
+        username={publicProfileUsername} 
+        shareCode={publicProfileShareCode}
+        onClose={() => {
+          setPublicProfileUsername(null);
+          setPublicProfileShareCode(null);
+          window.history.back();
+        }}
+      />
+    );
+  }
 
   if (authStage === AuthStage.LANDING) {
       return <LandingPage onStart={() => setAuthStage(AuthStage.LOGIN)} onDemo={handleTestUser} />;

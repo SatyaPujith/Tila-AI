@@ -71,14 +71,12 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, onClose, showNot
 
     const handleViewUserProfile = async (userId: string, userName: string) => {
         try {
-            // Generate share code for the user being viewed
-            const shareRes = await apiService.generateShareCode();
-            const shareCode = shareRes.shareCode;
-            
-            // Fetch public profile using username and share code
-            const userProfileRes = await apiService.getPublicProfile(userName, shareCode);
+            // Fetch public profile using username (no share code needed for viewing from leaderboard)
+            const userProfileRes = await apiService.getPublicProfile(userName);
             setViewingUser({ ...userProfileRes, id: userId, name: userName });
             
+            // Use the share code from the response to generate the shareable link
+            const shareCode = userProfileRes.shareCode || '';
             const url = `${window.location.origin}/profile/${userName}/${shareCode}`;
             setShareUrl(url);
         } catch (error) {
@@ -460,6 +458,32 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, onClose, showNot
                                                 className="w-full px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                                             >
                                                 {settingsLoading ? 'Updating...' : 'Update Settings'}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Share Profile */}
+                                    <div className="bg-zinc-900/20 border border-zinc-800 rounded p-4">
+                                        <h3 className="text-sm font-bold text-white mb-3">Share Profile</h3>
+                                        
+                                        <div className="space-y-3">
+                                            <p className="text-xs text-zinc-400">Share your profile with others using a unique link</p>
+                                            
+                                            <button
+                                                onClick={async () => {
+                                                    try {
+                                                        const shareRes = await apiService.generateShareCode();
+                                                        const url = `${window.location.origin}/profile/${user.name}/${shareRes.shareCode}`;
+                                                        navigator.clipboard.writeText(url);
+                                                        showNotification('Profile link copied to clipboard', 'success');
+                                                    } catch (error) {
+                                                        console.error('Error generating share code:', error);
+                                                        showNotification('Failed to generate share link', 'error');
+                                                    }
+                                                }}
+                                                className="w-full px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded text-xs font-semibold transition-all"
+                                            >
+                                                Generate & Copy Link
                                             </button>
                                         </div>
                                     </div>

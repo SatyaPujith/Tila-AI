@@ -389,8 +389,9 @@ class ApiService {
     });
   }
 
-  async getPublicProfile(username: string, shareCode: string) {
-    return this.request(`/profile/public/${encodeURIComponent(username)}/${shareCode}`);
+  async getPublicProfile(username: string, shareCode?: string) {
+    const code = shareCode ? `/${shareCode}` : '';
+    return this.request(`/profile/public/${encodeURIComponent(username)}${code}`);
   }
 
   async updateProfile(name: string, password?: string) {

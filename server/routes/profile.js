@@ -197,8 +197,8 @@ router.get('/public/:username/:shareCode?', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // If share code is provided, verify it matches
-    if (shareCode && shareCode !== user.shareCode) {
+    // If share code is provided and it doesn't match, reject
+    if (shareCode && shareCode !== 'undefined' && shareCode !== user.shareCode) {
       return res.status(403).json({ error: 'Invalid share code' });
     }
 
