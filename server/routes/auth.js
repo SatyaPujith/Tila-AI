@@ -43,7 +43,8 @@ router.post('/register', async (req, res) => {
         rank: user.rank,
         problemsSolvedEasy: user.problemsSolvedEasy,
         problemsSolvedMedium: user.problemsSolvedMedium,
-        problemsSolvedHard: user.problemsSolvedHard
+        problemsSolvedHard: user.problemsSolvedHard,
+        impactScore: 0
       }
     });
   } catch (error) {
@@ -58,6 +59,10 @@ router.get('/me', authMiddleware, async (req, res) => {
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
+    
+    // Calculate impact score if not stored
+    const impactScore = user.impactScore || ((user.problemsSolvedEasy * 10) + (user.problemsSolvedMedium * 30) + (user.problemsSolvedHard * 60));
+    
     res.json({
       id: user._id,
       name: user.name,
@@ -68,7 +73,8 @@ router.get('/me', authMiddleware, async (req, res) => {
       rank: user.rank,
       problemsSolvedEasy: user.problemsSolvedEasy,
       problemsSolvedMedium: user.problemsSolvedMedium,
-      problemsSolvedHard: user.problemsSolvedHard
+      problemsSolvedHard: user.problemsSolvedHard,
+      impactScore: impactScore
     });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
@@ -109,6 +115,9 @@ router.post('/login', async (req, res) => {
     // Generate token
     const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
+    // Calculate impact score
+    const impactScore = user.impactScore || ((user.problemsSolvedEasy * 10) + (user.problemsSolvedMedium * 30) + (user.problemsSolvedHard * 60));
+
     res.json({
       token,
       user: {
@@ -120,10 +129,55 @@ router.post('/login', async (req, res) => {
         rank: user.rank,
         problemsSolvedEasy: user.problemsSolvedEasy,
         problemsSolvedMedium: user.problemsSolvedMedium,
-        problemsSolvedHard: user.problemsSolvedHard
+        problemsSolvedHard: user.problemsSolvedHard,
+        impactScore: impactScore
       }
     });
   } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update Profile
+router.put('/update-profile', authMiddleware, async (req, res) => {
+  try {
+    const { name, password } = req.body;
+    const userId = req.userId;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Update name if provided
+    if (name) {
+      user.name = name;
+    }
+
+    // Update password if provided
+    if (password) {
+      user.password = await bcrypt.hash(password, 10);
+    }
+
+    await user.save();
+
+    res.json({
+      message: 'Profile updated successfully',
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        streak: user.streak,
+        xp: user.xp,
+        rank: user.rank,
+        problemsSolvedEasy: user.problemsSolvedEasy,
+        problemsSolvedMedium: user.problemsSolvedMedium,
+        problemsSolvedHard: user.problemsSolvedHard,
+        impactScore: user.impactScore || ((user.problemsSolvedEasy * 10) + (user.problemsSolvedMedium * 30) + (user.problemsSolvedHard * 60))
+      }
+    });
+  } catch (error) {
+    console.error('Error updating profile:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

@@ -18,6 +18,7 @@ const linkSchema = new mongoose.Schema({
 
 const roadmapSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  projectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Project', required: true },
   topic: { type: String, required: true },
   nodes: { type: [nodeSchema], default: [] },
   links: { type: [linkSchema], default: [] },

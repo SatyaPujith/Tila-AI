@@ -69,6 +69,7 @@ export enum ViewState {
   ROADMAP = 'roadmap', // Was Graph
   CHALLENGES = 'challenges', // Was Quiz
   SNIPPETS = 'snippets', // Was Notebook
+  FILES = 'files', // Editor files library
   COMMUNITY = 'community'
 }
 
@@ -108,6 +109,7 @@ export interface Project {
   code: string;
   language: ProgrammingLanguage;
   snippets: CodeSnippet[];
+  editorFiles?: Array<{ id: string; name: string; content: string; type: string }>; // Files created in editor
   
   // Per-notebook data isolation
   challenges?: any[];
@@ -143,6 +145,7 @@ export interface CodingChallenge {
   description: string;
   starterCode: string;
   testCases: string[];
+  completed?: boolean;
 }
 
 export interface GraphNode {

@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Terminal, Upload, File, Trash2, Code2, Map, Trophy, Users, BookOpen, Sparkles, LayoutGrid, LogOut, Download, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { Terminal, Upload, File, Trash2, Code2, Map, Trophy, Users, BookOpen, LayoutGrid, LogOut, Download, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { StudyFile, ViewState, User } from '../types';
 
 interface SidebarProps {
@@ -10,14 +10,13 @@ interface SidebarProps {
   setViewState: (v: ViewState) => void;
   user: User | null;
   onLogout: () => void;
-  onGenerateSyllabus: () => void;
   onShowProfile: () => void;
   onBackToDashboard: () => void;
   onDownloadProject: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
-  files, onUpload, onRemoveFile, viewState, setViewState, user, onLogout, onGenerateSyllabus, onShowProfile, onBackToDashboard, onDownloadProject
+  files, onUpload, onRemoveFile, viewState, setViewState, user, onLogout, onShowProfile, onBackToDashboard, onDownloadProject
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isCollapsed, setIsCollapsed] = useState(true);
@@ -27,16 +26,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const navItemClass = (active: boolean) => 
-    `flex items-center gap-3 px-3 py-2 text-xs font-medium transition-all cursor-pointer rounded-lg mb-0.5 ${
+    `flex items-center gap-3 px-3 py-2 text-xs font-medium transition-all cursor-pointer rounded-lg mb-0.5 focus:outline-none focus:ring-0 active:outline-none active:ring-0 border border-transparent ${
       active 
-        ? 'bg-violet-600/20 text-violet-400 border border-violet-500/30' 
+        ? 'bg-violet-600/20 text-violet-400 border-violet-500/30' 
         : 'text-zinc-500 hover:text-white hover:bg-zinc-900/50'
     }`;
 
   const collapsedNavClass = (active: boolean) =>
-    `w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+    `w-9 h-9 rounded-lg flex items-center justify-center transition-all focus:outline-none focus:ring-0 active:outline-none active:ring-0 border border-transparent ${
       active 
-        ? 'bg-violet-600/20 text-violet-400 border border-violet-500/30' 
+        ? 'bg-violet-600/20 text-violet-400 border-violet-500/30' 
         : 'text-zinc-500 hover:text-white hover:bg-zinc-900'
     }`;
 
@@ -54,7 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
         <button 
           onClick={() => setIsCollapsed(!isCollapsed)}
-          className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900 transition-all"
+          className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900 transition-all focus:outline-none active:outline-none active:ring-0"
           title={isCollapsed ? 'Expand' : 'Collapse'}
         >
           {isCollapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
@@ -112,16 +111,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {/* Syllabus Section - Only when expanded */}
+      {/* Files Section - Only when expanded */}
       {!isCollapsed && (
         <div className="flex-1 px-2 py-2 flex flex-col min-h-0">
           <div className="flex items-center justify-between mb-1.5 px-2">
-            <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-wider">Syllabus</p>
+            <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-wider">Files</p>
             <div className="flex gap-1">
-              <button onClick={onGenerateSyllabus} title="Generate with AI" className="text-violet-400 hover:text-white transition-colors flex items-center justify-center w-5 h-5 rounded bg-violet-900/20 hover:bg-violet-900/40">
-                <Sparkles className="w-2.5 h-2.5" />
-              </button>
-              <button onClick={triggerUpload} title="Upload File" className="text-zinc-400 hover:text-white transition-colors flex items-center justify-center w-5 h-5 rounded bg-zinc-900 hover:bg-zinc-800">
+              <button onClick={triggerUpload} title="Upload File" className="text-zinc-400 hover:text-white transition-colors flex items-center justify-center w-5 h-5 rounded bg-zinc-900 hover:bg-zinc-800 focus:outline-none active:outline-none active:ring-0">
                 <Upload className="w-2.5 h-2.5" />
               </button>
             </div>
@@ -146,7 +142,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
           </div>
           
-          <button onClick={onDownloadProject} className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-500 hover:text-white text-[10px] font-medium transition-colors">
+          <button onClick={onDownloadProject} className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-500 hover:text-white text-[10px] font-medium transition-colors focus:outline-none active:outline-none active:ring-0">
             <Download className="w-3 h-3" />
             Download
           </button>
@@ -160,20 +156,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className={`border-t border-zinc-800/50 ${isCollapsed ? 'p-1.5' : 'p-2'}`}>
         {isCollapsed ? (
           <div className="flex flex-col items-center gap-1">
-            <button onClick={onBackToDashboard} className="w-9 h-9 rounded-lg flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900" title="Dashboard">
+            <button onClick={onBackToDashboard} className="w-9 h-9 rounded-lg flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900 focus:outline-none active:outline-none active:ring-0" title="Dashboard">
               <LayoutGrid className="w-4 h-4" />
             </button>
-            <button onClick={onShowProfile} className="w-9 h-9 rounded-lg bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-white" title="Profile">
+            <button onClick={onShowProfile} className="w-9 h-9 rounded-lg bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-white focus:outline-none active:outline-none active:ring-0" title="Profile">
               <span className="font-mono font-bold text-[9px]">{user?.name?.charAt(0) || 'U'}</span>
             </button>
           </div>
         ) : (
           <>
-            <button onClick={onBackToDashboard} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-900 text-xs mb-1">
+            <button onClick={onBackToDashboard} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-900 text-xs mb-1 focus:outline-none active:outline-none active:ring-0">
               <LayoutGrid className="w-3.5 h-3.5" />
               <span>Dashboard</span>
             </button>
-            <div onClick={onShowProfile} className="flex items-center justify-between p-2 rounded-lg hover:bg-zinc-900 cursor-pointer group">
+            <div onClick={onShowProfile} className="flex items-center justify-between p-2 rounded-lg hover:bg-zinc-900 cursor-pointer group focus:outline-none active:outline-none active:ring-0">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-400 group-hover:text-white text-[10px] font-bold">
                   {user?.name?.charAt(0) || 'U'}
@@ -183,7 +179,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <span className="text-[9px] text-zinc-600">{user?.rank}</span>
                 </div>
               </div>
-              <button onClick={(e) => { e.stopPropagation(); onLogout(); }} className="text-zinc-600 hover:text-white">
+              <button onClick={(e) => { e.stopPropagation(); onLogout(); }} className="text-zinc-600 hover:text-white focus:outline-none active:outline-none active:ring-0">
                 <LogOut className="w-3 h-3" />
               </button>
             </div>

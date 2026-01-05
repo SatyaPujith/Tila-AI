@@ -27,17 +27,47 @@ class ApiService {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
-    const response = await fetch(`${API_URL}${endpoint}`, {
-      ...options,
-      headers,
-    });
+    try {
+      const fullUrl = `${API_URL}${endpoint}`;
+      console.log(`[API] ${options.method || 'GET'} ${fullUrl}`);
+      
+      const response = await fetch(fullUrl, {
+        ...options,
+        headers,
+      });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Request failed');
+      console.log(`[API] Response status: ${response.status}`);
+
+      if (!response.ok) {
+        try {
+          const error = await response.json();
+          console.error('API Error Response:', {
+            status: response.status,
+            statusText: response.statusText,
+            error: error
+          });
+          throw new Error(error.error || `Request failed with status ${response.status}`);
+        } catch (e) {
+          console.error('Failed to parse error response:', e);
+          throw new Error(`Request failed with status ${response.status}`);
+        }
+      }
+
+      const responseText = await response.text();
+      console.log(`[API] Response text length: ${responseText.length}`);
+      
+      if (!responseText) {
+        console.log('[API] Response is empty, returning empty array');
+        return [];
+      }
+      
+      const data = JSON.parse(responseText);
+      console.log(`[API] Parsed response data:`, data);
+      return data;
+    } catch (error) {
+      console.error('[API] Request error:', error);
+      throw error;
     }
-
-    return response.json();
   }
 
   // Auth
@@ -180,26 +210,29 @@ class ApiService {
   }
 
   // Roadmaps
-  async getRoadmaps() {
-    return this.request('/roadmaps');
+  async getRoadmaps(projectId: string) {
+    console.log('[API] Getting roadmaps for project:', projectId, 'token:', this.token ? 'exists' : 'missing');
+    const result = await this.request(`/roadmaps/${projectId}`);
+    console.log('[API] getRoadmaps result:', result);
+    return result;
   }
 
-  async createRoadmap(topic: string, nodes: any[], links: any[]) {
-    return this.request('/roadmaps', {
+  async createRoadmap(projectId: string, topic: string, nodes: any[], links: any[]) {
+    return this.request(`/roadmaps/${projectId}`, {
       method: 'POST',
       body: JSON.stringify({ topic, nodes, links }),
     });
   }
 
-  async updateRoadmapNode(roadmapId: string, nodeId: string, status: string) {
-    return this.request(`/roadmaps/${roadmapId}/nodes/${nodeId}`, {
+  async updateRoadmapNode(projectId: string, roadmapId: string, nodeId: string, status: string) {
+    return this.request(`/roadmaps/${projectId}/${roadmapId}/nodes/${nodeId}`, {
       method: 'PUT',
       body: JSON.stringify({ status }),
     });
   }
 
-  async generateChallengesForNode(roadmapId: string, nodeId: string, nodeLabel: string) {
-    return this.request(`/roadmaps/${roadmapId}/nodes/${nodeId}/challenges`, {
+  async generateChallengesForNode(projectId: string, roadmapId: string, nodeId: string, nodeLabel: string) {
+    return this.request(`/roadmaps/${projectId}/${roadmapId}/nodes/${nodeId}/challenges`, {
       method: 'POST',
       body: JSON.stringify({ nodeLabel }),
     });
@@ -331,6 +364,39 @@ class ApiService {
   async forkCommunityPost(id: string) {
     return this.request(`/community/${id}/fork`, {
       method: 'POST',
+    });
+  }
+
+  // Profile
+  async getProfile(userId: string) {
+    return this.request(`/profile/${userId}`);
+  }
+
+  async logProblem(userId: string, difficulty: string, date?: string) {
+    return this.request(`/profile/${userId}/log-problem`, {
+      method: 'POST',
+      body: JSON.stringify({ difficulty, date }),
+    });
+  }
+
+  async getLeaderboard(limit: number = 10) {
+    return this.request(`/profile/leaderboard/top?limit=${limit}`);
+  }
+
+  async generateShareCode() {
+    return this.request('/profile/share/generate', {
+      method: 'POST',
+    });
+  }
+
+  async getPublicProfile(username: string, shareCode: string) {
+    return this.request(`/profile/public/${encodeURIComponent(username)}/${shareCode}`);
+  }
+
+  async updateProfile(name: string, password?: string) {
+    return this.request('/auth/update-profile', {
+      method: 'PUT',
+      body: JSON.stringify({ name, password }),
     });
   }
 }

@@ -32,6 +32,12 @@ const projectSchema = new mongoose.Schema({
     createdAt: Date,
     complexity: String
   }],
+  editorFiles: [{
+    id: String,
+    name: String,
+    content: String,
+    type: String
+  }],
   // Per-notebook challenges
   challenges: [{
     id: String,
@@ -43,7 +49,7 @@ const projectSchema = new mongoose.Schema({
     completed: Boolean,
     solution: String
   }],
-  // Per-notebook roadmaps
+  // Per-notebook roadmaps - using flexible schema
   roadmaps: [{
     id: String,
     title: String,
@@ -52,9 +58,7 @@ const projectSchema = new mongoose.Schema({
       id: String,
       label: String,
       type: String,
-      status: String,
-      x: Number,
-      y: Number
+      status: String
     }],
     links: [{
       source: String,
@@ -64,6 +68,6 @@ const projectSchema = new mongoose.Schema({
   }],
   lastEdited: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now }
-});
+}, { strict: false });
 
 export default mongoose.model('Project', projectSchema);

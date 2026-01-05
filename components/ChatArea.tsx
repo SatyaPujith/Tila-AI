@@ -219,7 +219,6 @@ interface ChatAreaProps {
   // New Props
   onLanguageChange?: (lang: ProgrammingLanguage) => void;
   onSaveSnippet?: () => void;
-  onChallengeComplete?: () => void;
   chatSessions?: any[];
   activeChatId?: string | null;
   onNewChat?: () => void;
@@ -229,6 +228,11 @@ interface ChatAreaProps {
   onDeleteMessage?: (messageId: string) => void;
   onDeleteChat?: (chatId: string) => void;
   onRenameChat?: (chatId: string, newTitle: string) => void;
+  onCreateFileFromCode?: (code: string, fileName: string, language: ProgrammingLanguage) => void;
+  editorFiles?: Array<{ id: string; name: string; content: string; type: string }>;
+  onRemoveFile?: (fileId: string) => void;
+  onAddFile?: (file: { id: string; name: string; content: string; type: string }) => void;
+  onUpdateFile?: (fileId: string, updates: { name?: string; type?: string; content?: string }) => void;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
@@ -245,9 +249,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   setExplanationStyle,
   code, setCode, language, setLanguage, runCode, editorOutput, isRunningCode,
   callStatus, toggleCall, executionMode, setExecutionMode,
-  onLanguageChange, onSaveSnippet, onChallengeComplete,
+  onLanguageChange, onSaveSnippet,
   chatSessions = [], activeChatId, onNewChat, onSwitchChat, showChatHistory = false, onToggleChatHistory,
-  onDeleteMessage, onDeleteChat, onRenameChat
+  onDeleteMessage, onDeleteChat, onRenameChat, onCreateFileFromCode, editorFiles = [], onRemoveFile, onAddFile, onUpdateFile
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [chatWidth, setChatWidth] = useState(40); // Percentage
@@ -479,23 +483,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     )}
                  </button>
 
-                 {/* Mode Selector */}
-                <div className="flex items-center gap-1 bg-zinc-900 p-0.5 rounded-lg border border-zinc-800">
-                    <button 
-                        onClick={() => setMode(AppMode.SYLLABUS)}
-                        className={`px-2 py-1 text-[10px] font-bold rounded transition-all flex items-center gap-1.5 ${mode === AppMode.SYLLABUS ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                        <Zap className="w-3 h-3" />
-                        Syllabus
-                    </button>
-                    <button 
-                        onClick={() => setMode(AppMode.GENERAL)}
-                        className={`px-2 py-1 text-[10px] font-bold rounded transition-all flex items-center gap-1.5 ${mode === AppMode.GENERAL ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                        <Globe className="w-3 h-3" />
-                        Global
-                    </button>
-                </div>
+
             </div>
             
             <div className="flex items-center gap-1">
@@ -581,6 +569,25 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                             ) : (
                                 <p className="whitespace-pre-wrap">{msg.text || msg.content || ''}</p>
                             )}
+                            
+                            {/* Add code to editor button for AI messages with code blocks */}
+                            {msg.role === MessageRole.MODEL && onCreateFileFromCode && (msg.text || msg.content || '').includes('```') && (
+                                <button
+                                    onClick={() => {
+                                        const codeMatch = (msg.text || msg.content || '').match(/```(\w+)?\n([\s\S]*?)```/);
+                                        if (codeMatch) {
+                                            const lang = (codeMatch[1] || language) as ProgrammingLanguage;
+                                            const code = codeMatch[2].trim();
+                                            const fileName = `solution_${Date.now()}.${lang === ProgrammingLanguage.PYTHON ? 'py' : lang === ProgrammingLanguage.JAVASCRIPT ? 'js' : lang === ProgrammingLanguage.TYPESCRIPT ? 'ts' : lang === ProgrammingLanguage.CPP ? 'cpp' : 'java'}`;
+                                            onCreateFileFromCode(code, fileName, lang);
+                                        }
+                                    }}
+                                    className="mt-2 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all"
+                                >
+                                    <Plus className="w-3 h-3" />
+                                    Add to Editor
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -662,7 +669,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             setExecutionMode={setExecutionMode}
             onLanguageChange={onLanguageChange}
             onSaveSnippet={onSaveSnippet}
-            onChallengeComplete={onChallengeComplete}
+            editorFiles={editorFiles}
+            onRemoveFile={onRemoveFile}
+            onAddFile={onAddFile}
+            onUpdateFile={onUpdateFile}
           />
       </div>
     </div>

@@ -10,6 +10,10 @@ const userSchema = new mongoose.Schema({
   problemsSolvedEasy: { type: Number, default: 0 },
   problemsSolvedMedium: { type: Number, default: 0 },
   problemsSolvedHard: { type: Number, default: 0 },
+  impactScore: { type: Number, default: 0 },
+  problemsPerDay: { type: Map, of: Number, default: new Map() },
+  lastSolvedDate: { type: Date },
+  shareCode: { type: String, unique: true, sparse: true },
   lastLoginDate: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now }
 });

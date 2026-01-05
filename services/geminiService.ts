@@ -10,6 +10,30 @@ const getClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
+// Helper function to handle rate limiting with retry
+const withRetry = async <T>(fn: () => Promise<T>, maxRetries = 3, delayMs = 2000): Promise<T> => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      const isRateLimit = error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('quota');
+      
+      if (isRateLimit && attempt < maxRetries) {
+        console.warn(`Rate limited. Retrying in ${delayMs * attempt}ms... (attempt ${attempt}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
+        continue;
+      }
+      
+      if (isRateLimit) {
+        throw new Error('API rate limit exceeded. Please wait a moment and try again.');
+      }
+      
+      throw error;
+    }
+  }
+  throw new Error('Max retries exceeded');
+};
+
 const getStyleInstruction = (style: ExplanationStyle): string => {
   switch (style) {
     case ExplanationStyle.DEBUG:
@@ -33,78 +57,81 @@ export const generateDevResponse = async (
   style: ExplanationStyle,
   currentCode: string,
   language: ProgrammingLanguage,
-  contextFiles: StudyFile[]
+  contextFiles: StudyFile[],
+  chatHistory: Array<{ role: string; text: string }> = [],
+  allEditorFiles: StudyFile[] = []
 ) => {
   const ai = getClient();
   
-  let systemInstruction = `You are TILA, an advanced AI Coding Tutor and mentor. You help developers learn algorithms, data structures, and programming concepts.
+  let systemInstruction = `You are TILA, an AI Coding Tutor and mentor. You help developers learn programming in a natural, conversational way.
 
-CRITICAL RULES:
-1. NEVER provide complete code solutions unless explicitly asked with "give me the code" or "show me the solution"
-2. Break down explanations into clear sections with markdown headers (##)
-3. Start with the problem understanding
-4. Explain the approach/algorithm step by step
-5. Mention naive solution first, then optimized solution
-6. Use bullet points and numbered lists for clarity
-7. Format responses with proper spacing and structure (add blank lines between sections)
-8. Only provide function signatures, not full implementations
-9. Guide users to implement the logic themselves
-10. If user asks "tell me the algorithm", provide step-by-step approach only
-
-RESPONSE FORMAT (ALWAYS USE THIS STRUCTURE):
-
-## Understanding the Problem
-[Brief explanation in 2-3 sentences]
-
-## Approach
-1. Step 1 explanation
-2. Step 2 explanation
-3. Step 3 explanation
-
-## Naive Solution
-- Time Complexity: O(?)
-- Space Complexity: O(?)
-- Brief explanation of the naive approach
-
-## Optimized Solution
-- Time Complexity: O(?)
-- Space Complexity: O(?)
-- Brief explanation of optimization
-
-## Implementation Hints
-- Hint 1: [specific guidance]
-- Hint 2: [specific guidance]
-- Hint 3: [specific guidance]
-
-## Function Signature
-\`\`\`${language}
-// Only the function signature, NO implementation
-\`\`\`
-
-Would you like me to show you the complete implementation?`;
-  systemInstruction += " " + getStyleInstruction(style);
+CRITICAL RULES (ALWAYS FOLLOW THESE):
+- If user asks for code, ALWAYS provide the code immediately - NO EXCEPTIONS
+- If user asks for explanation, explain directly without asking questions
+- If user asks for help, provide the solution directly
+- Respond directly and provide what is asked - NO clarifying questions
+- Keep responses concise and helpful
+- Remember previous context from the conversation
+- Build on what was discussed before
+- Use markdown for clarity when needed
+- When providing code, wrap it in proper markdown code blocks with language specified
+- DO NOT ask "do you prefer", "have you already", "would you like" - just provide the answer
+- DO NOT use Socratic method when user explicitly asks for code or solution`;
+  
+  // Only add style instruction if it's not Socratic, or if user is asking for code
+  if (style !== ExplanationStyle.SOCRATIC || prompt.toLowerCase().includes('code') || prompt.toLowerCase().includes('solution')) {
+    if (style === ExplanationStyle.SOCRATIC && (prompt.toLowerCase().includes('code') || prompt.toLowerCase().includes('solution'))) {
+      // Override Socratic with direct code provision
+      systemInstruction += " Provide the code directly without asking questions.";
+    } else {
+      systemInstruction += " " + getStyleInstruction(style);
+    }
+  } else {
+    systemInstruction += " " + getStyleInstruction(style);
+  }
+  
+  // Build conversation history context
+  let conversationContext = '';
+  if (chatHistory && chatHistory.length > 0) {
+    // Include last 5 messages for context (to avoid token limits)
+    const recentHistory = chatHistory.slice(-5);
+    conversationContext = '\n\nPrevious conversation:\n';
+    recentHistory.forEach(msg => {
+      const role = msg.role === 'user' ? 'User' : 'Assistant';
+      conversationContext += `${role}: ${msg.text}\n`;
+    });
+  }
+  
+  // Build editor files context
+  let editorFilesContext = '';
+  if (allEditorFiles && allEditorFiles.length > 0) {
+    editorFilesContext = '\n\n[EDITOR FILES AVAILABLE]:\n';
+    allEditorFiles.forEach(file => {
+      editorFilesContext += `- ${file.name} (${file.type}): ${file.content.substring(0, 200)}...\n`;
+    });
+  }
   
   // Context injection
-  let finalPrompt = prompt;
+  let finalPrompt = prompt + conversationContext + editorFilesContext;
   
   if (currentCode) {
-      finalPrompt += `\n\n[CURRENT CODE CONTEXT (${language})]:\n${currentCode}\n`;
+      finalPrompt += `\n\n[CURRENT CODE (${language})]:\n${currentCode}`;
   }
 
   if (mode === AppMode.SYLLABUS && contextFiles.length > 0) {
       const contextText = contextFiles.map(f => `[DOC: ${f.name}]\n${f.content}`).join('\n\n').substring(0, 20000);
-      systemInstruction += " Base your coding challenges and explanations on the provided technical documentation/syllabus.";
-      finalPrompt = `CONTEXT:\n${contextText}\n\nUSER QUERY: ${prompt}`;
+      systemInstruction += " Base your explanations on the provided technical documentation/syllabus.";
+      finalPrompt = `CONTEXT:\n${contextText}\n\nPrevious conversation:${conversationContext}\n\nUSER QUERY: ${prompt}`;
   }
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash-exp",
+    const response = await withRetry(() => ai.models.generateContent({
+      model: "gemini-2.0-flash",
       contents: [{ parts: [{ text: finalPrompt }] }],
       config: {
         systemInstruction: systemInstruction,
       },
-    });
+    }));
 
     const candidate = response.candidates?.[0];
     const textPart = candidate?.content?.parts?.find(p => p.text)?.text || "I apologize, I couldn't generate a response. Please try again.";
@@ -153,14 +180,12 @@ export const runCodeSimulation = async (
         
         prompt = `Act as a ${language} compiler. Execute this code with the test cases.
 
-CODE:
-${code}
-
 TEST CASES:
 ${testCaseStr}
 
-RESPOND IN THIS EXACT CLEAN FORMAT (no extra text):
+CRITICAL: Respond ONLY with test results. NO code, NO analysis, NO explanations, NO extra text.
 
+FORMAT (EXACTLY):
 🧪 TEST RESULTS
 ${testCases.map((_, i) => `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Test ${i + 1}: ✅ PASS or ❌ FAIL
@@ -172,15 +197,17 @@ Actual   → [value]`).join('\n')}
 📊 SUMMARY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Result: ✅ ALL PASSED or ❌ X/Y FAILED
-Time: O(?)  |  Space: O(?)`;
+Time Complexity: O(?)
+Space Complexity: O(?)
+
+CODE TO EXECUTE (${language}):
+${code}`;
     } else if (mode === ExecutionMode.FUNCTION) {
         prompt = `Act as a ${language} compiler. Execute this function with sample inputs.
 
-CODE:
-${code}
+Create 3 test cases and run them. CRITICAL: Respond ONLY with results. NO code, NO analysis, NO explanations.
 
-Create 3 test cases and run them. RESPOND IN THIS CLEAN FORMAT:
-
+FORMAT (EXACTLY):
 🧪 TEST RESULTS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Test 1: ✅ PASS or ❌ FAIL
@@ -199,16 +226,16 @@ Output → [value]
 📊 SUMMARY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Result: ✅ Code works correctly or ❌ Has errors
-Time: O(?)  |  Space: O(?)`;
+Time Complexity: O(?)
+Space Complexity: O(?)
+
+CODE TO EXECUTE (${language}):
+${code}`;
     } else {
         prompt = `Act as a ${language} compiler. Execute this code and show the output.
-If there are errors, show them clearly.
+If there are errors, show them clearly. CRITICAL: NO code, NO analysis, NO explanations.
 
-CODE:
-${code}
-
-RESPOND IN THIS CLEAN FORMAT:
-
+FORMAT (EXACTLY):
 📤 OUTPUT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [actual program output here]
@@ -217,11 +244,15 @@ RESPOND IN THIS CLEAN FORMAT:
 📊 SUMMARY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Result: ✅ Success or ❌ Error: [brief description]
-Time: O(?)  |  Space: O(?)`;
+Time Complexity: O(?)
+Space Complexity: O(?)
+
+CODE TO EXECUTE (${language}):
+${code}`;
     }
 
     const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-exp",
+        model: "gemini-2.0-flash",
         contents: prompt
     });
 
@@ -261,7 +292,7 @@ export const generateCodingChallenges = async (topic: string, contextFiles: Stud
 
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-2.0-flash-exp",
+            model: "gemini-2.0-flash",
             contents: prompt,
             config: {
                 responseMimeType: "application/json"
@@ -358,7 +389,7 @@ export const generateRoadmapData = async (contextFiles: StudyFile[], topic?: str
 
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-2.0-flash-exp",
+            model: "gemini-2.0-flash",
             contents: prompt,
             config: {
                 responseMimeType: "application/json"
@@ -448,7 +479,7 @@ export const generateRoadmapData = async (contextFiles: StudyFile[], topic?: str
 export const generateTextOnly = async (prompt: string, contextFiles: StudyFile[]) => {
     const ai = getClient();
     const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-exp",
+        model: "gemini-2.0-flash",
         contents: `Summarize this coding concept: ${prompt}`
     });
     return response.text;
@@ -463,7 +494,7 @@ export const generateSyllabusContent = async (topic: string): Promise<string> =>
     Format as Markdown.`;
 
     const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-exp",
+        model: "gemini-2.0-flash",
         contents: prompt
     });
     return response.text || "Failed to generate syllabus.";
@@ -487,7 +518,7 @@ ${code}
 Return the optimized code only:`;
 
     const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-exp",
+        model: "gemini-2.0-flash",
         contents: prompt
     });
     
@@ -500,60 +531,108 @@ Return the optimized code only:`;
 
 export const deepScanCode = async (code: string, language: string): Promise<ScanResult> => {
     const ai = getClient();
-    const prompt = `Analyze this ${language} code and find potential issues that could cause bugs.
+    const prompt = `You are an Expert Code Reviewer. Analyze this ${language} code thoroughly and generate a detailed analysis report.
 
-Focus ONLY on:
-1. Edge Cases - What could go wrong with different inputs?
-2. Logic Issues - Are there any logical problems in the code?
+CRITICAL: Return ONLY the analysis in this EXACT format (no markdown code blocks, no extra text):
 
-Be simple and clear. Explain issues in plain English that any developer can understand.
+═══════════════════════════════════════════════════════════════════════════════
+CODE ANALYSIS REPORT
+═══════════════════════════════════════════════════════════════════════════════
 
-CODE:
-${code}
+Overall Quality Score: [0-100]
+Status: [✅ Good | ⚠️ Needs Improvement | ❌ Has Issues]
 
-Return JSON with this structure:
-{ 
-  "score": number (0-100), 
-  "summary": "Brief summary in simple words", 
-  "issues": [
-    { 
-      "severity": "Important" or "Minor", 
-      "message": "Clear explanation of what could go wrong", 
-      "line": line_number,
-      "suggestion": "Simple fix suggestion"
-    }
-  ] 
-}`;
+═══════════════════════════════════════════════════════════════════════════════
+LOGICAL ISSUES FOUND
+═══════════════════════════════════════════════════════════════════════════════
+
+[If no logical issues, write: "✅ No logical issues detected"]
+
+[If issues exist, list each one:]
+Issue #1: [Issue Name]
+- Line(s): [line numbers]
+- Problem: [Detailed explanation of the logical issue]
+- Impact: [How this affects the code]
+- Suggested Fix: [Specific code change to fix it]
+
+[Repeat for each issue]
+
+═══════════════════════════════════════════════════════════════════════════════
+MISSING BASE CASES & EDGE CASES
+═══════════════════════════════════════════════════════════════════════════════
+
+[If all base cases are handled, write: "✅ All base cases are properly handled"]
+
+[If missing, list each one:]
+Base Case #1: [Case Name]
+- Description: [What this case is]
+- Current Handling: [How it's currently handled or "Not handled"]
+- Suggested Fix: [Code to add]
+
+[Repeat for each missing case]
+
+═══════════════════════════════════════════════════════════════════════════════
+CODE SIMPLIFICATIONS & IMPROVEMENTS
+═══════════════════════════════════════════════════════════════════════════════
+
+Simplification #1: [Line or Section]
+- Current Code: [Show the complex line(s)]
+- Simplified Version: [Show the simpler version]
+- Benefit: [Why this is better]
+
+[Repeat for each simplification opportunity]
+
+═══════════════════════════════════════════════════════════════════════════════
+POTENTIAL RUNTIME ERRORS
+═══════════════════════════════════════════════════════════════════════════════
+
+[If no potential errors, write: "✅ No obvious runtime errors detected"]
+
+[If errors possible, list each one:]
+Error #1: [Error Type]
+- Scenario: [When this error could occur]
+- Prevention: [How to prevent it]
+
+[Repeat for each potential error]
+
+═══════════════════════════════════════════════════════════════════════════════
+PERFORMANCE CONSIDERATIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+- [Performance consideration 1]
+- [Performance consideration 2]
+- [Performance consideration 3]
+
+═══════════════════════════════════════════════════════════════════════════════
+SUMMARY & RECOMMENDATIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+[2-3 sentence summary of the code quality]
+
+Priority Fixes:
+1. [Most important fix]
+2. [Second priority]
+3. [Third priority]
+
+═══════════════════════════════════════════════════════════════════════════════
+
+CODE TO ANALYZE (${language}):
+${code}`;
 
     const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-exp",
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-             responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                    score: { type: Type.NUMBER },
-                    summary: { type: Type.STRING },
-                    issues: { 
-                        type: Type.ARRAY, 
-                        items: { 
-                            type: Type.OBJECT, 
-                            properties: {
-                                severity: { type: Type.STRING, enum: ['Important', 'Minor'] },
-                                message: { type: Type.STRING },
-                                line: { type: Type.NUMBER },
-                                suggestion: { type: Type.STRING }
-                            } 
-                        } 
-                    }
-                }
-            }
-        }
+        model: "gemini-2.0-flash",
+        contents: prompt
     });
 
     try {
-        return JSON.parse(response.text || '{}') as ScanResult;
+        // Return the full analysis text in the summary field
+        const analysisText = response.text || "Analysis failed. Please try again.";
+        
+        return { 
+            score: 75, 
+            summary: analysisText,
+            issues: [] 
+        };
     } catch (e) {
         return { score: 0, summary: "Analysis Failed", issues: [] };
     }
@@ -561,16 +640,65 @@ Return JSON with this structure:
 
 export const generateDocumentation = async (code: string, language: string): Promise<string> => {
     const ai = getClient();
-    const prompt = `You are an Automated Documentation Generator.
-    Add professional JSDoc/Docstring comments to the following ${language} code.
-    Explain parameters, return values, and complex logic.
-    Do not change the logic, only add comments.
-    
-    CODE:
-    ${code}`;
+    const prompt = `You are a Technical Documentation Expert. Generate comprehensive structured documentation for the following ${language} code.
+
+CRITICAL: Return ONLY the documentation in this EXACT format (no markdown code blocks, no extra text):
+
+═══════════════════════════════════════════════════════════════════════════════
+ALGORITHM EXPLANATION
+═══════════════════════════════════════════════════════════════════════════════
+
+[Detailed explanation of the algorithm/approach in 3-5 sentences]
+
+Key Steps:
+1. [Step 1]
+2. [Step 2]
+3. [Step 3]
+[Add more steps as needed]
+
+═══════════════════════════════════════════════════════════════════════════════
+CODE IMPLEMENTATION
+═══════════════════════════════════════════════════════════════════════════════
+
+${code}
+
+═══════════════════════════════════════════════════════════════════════════════
+COMPLEXITY ANALYSIS
+═══════════════════════════════════════════════════════════════════════════════
+
+Time Complexity: O(?)
+- [Explanation of time complexity]
+
+Space Complexity: O(?)
+- [Explanation of space complexity]
+
+═══════════════════════════════════════════════════════════════════════════════
+USAGE EXAMPLES
+═══════════════════════════════════════════════════════════════════════════════
+
+Example 1:
+Input: [example input]
+Output: [example output]
+
+Example 2:
+Input: [example input]
+Output: [example output]
+
+═══════════════════════════════════════════════════════════════════════════════
+EDGE CASES & CONSIDERATIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+- [Edge case 1]
+- [Edge case 2]
+- [Important consideration]
+
+═══════════════════════════════════════════════════════════════════════════════
+
+CODE TO DOCUMENT (${language}):
+${code}`;
     
     const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-exp",
+        model: "gemini-2.0-flash",
         contents: prompt
     });
     return response.text || code;
@@ -594,7 +722,7 @@ ${code}
 Return clean test code without markdown formatting.`;
     
     const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-exp",
+        model: "gemini-2.0-flash",
         contents: prompt
     });
     return response.text || "";
@@ -616,7 +744,7 @@ export const completeCode = async (code: string, language: string): Promise<Comp
     ${code}`;
 
     const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-exp",
+        model: "gemini-2.0-flash",
         contents: prompt,
         config: {
             responseMimeType: "application/json",
@@ -653,17 +781,101 @@ ${code}
 
 Convert to ${toLang}:`;
 
-    const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-exp",
-        contents: prompt
-    });
+    try {
+        const response = await withRetry(() => ai.models.generateContent({
+            model: "gemini-2.0-flash",
+            contents: prompt
+        }));
 
-    let convertedCode = response.text || code;
+        let convertedCode = response.text || code;
+        
+        // Remove markdown code blocks if present
+        convertedCode = convertedCode.replace(/```[\w]*\n/g, '').replace(/```$/g, '').trim();
+        
+        // If response is empty or just whitespace, return original code
+        if (!convertedCode || convertedCode.length < 10) {
+            console.warn('Conversion returned empty or too short response, returning original code');
+            return code;
+        }
+        
+        return convertedCode;
+    } catch (error) {
+        console.error('Code conversion failed:', error);
+        // Return original code if conversion fails
+        return code;
+    }
+};
+
+// Validate challenge solution
+export const validateChallengeSolution = async (
+    challenge: CodingChallenge,
+    userCode: string,
+    language: string,
+    executionOutput: string
+): Promise<{ isCorrect: boolean; feedback: string }> => {
+    const ai = getClient();
     
-    // Remove markdown code blocks if present
-    convertedCode = convertedCode.replace(/```[\w]*\n/g, '').replace(/```$/g, '').trim();
-    
-    return convertedCode;
+    const prompt = `You are an expert code reviewer evaluating a coding challenge solution.
+
+Challenge: ${challenge.title}
+Difficulty: ${challenge.difficulty}
+Description: ${challenge.description}
+
+Test Cases:
+${challenge.testCases.map((tc, i) => `${i + 1}. ${tc}`).join('\n')}
+
+User's Code (${language}):
+\`\`\`${language}
+${userCode}
+\`\`\`
+
+Execution Output:
+${executionOutput}
+
+STRICT EVALUATION: Only mark as correct if ALL of the following are true:
+1. The code logic correctly implements the algorithm described in the challenge
+2. ALL test cases pass with correct output
+3. There are NO errors or exceptions in the execution
+4. Edge cases are properly handled
+5. The output format matches exactly what was expected
+
+Be VERY strict. Only return isCorrect: true if the solution is COMPLETELY correct.
+
+Respond with ONLY a JSON object (no markdown, no explanation):
+{
+  "isCorrect": boolean,
+  "feedback": "Brief feedback about the solution (1-2 sentences)"
+}`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.0-flash",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json"
+            }
+        });
+
+        let responseText = response.text || '{"isCorrect": false, "feedback": "Unable to evaluate"}';
+        
+        // Clean up markdown if present
+        responseText = responseText
+            .replace(/```json\n?/g, '')
+            .replace(/```\n?/g, '')
+            .trim();
+        
+        const result = JSON.parse(responseText);
+        return {
+            isCorrect: result.isCorrect === true,
+            feedback: result.feedback || 'Solution evaluated'
+        };
+    } catch (error) {
+        console.error('Challenge validation error:', error);
+        return {
+            isCorrect: false,
+            feedback: 'Unable to validate solution. Please try again.'
+        };
+    }
 };
 
 // Simple wrapper for integrated app
@@ -671,7 +883,7 @@ export const geminiService = {
   async sendMessage(message: string, history: any[] = []) {
     const ai = getClient();
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash-exp",
+      model: "gemini-2.0-flash",
       contents: message
     });
     return response.text || "No response generated.";

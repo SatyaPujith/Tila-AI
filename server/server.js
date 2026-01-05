@@ -11,14 +11,32 @@ import roadmapRoutes from './routes/roadmaps.js';
 import snippetRoutes from './routes/snippets.js';
 import chatHistoryRoutes from './routes/chatHistory.js';
 import communityRoutes from './routes/community.js';
+import profileRoutes from './routes/profile.js';
 
-dotenv.config();
+dotenv.config({ path: './.env' });
 
 const app = express();
 
+// CORS Configuration
+const corsOptions = {
+  origin: process.env.CORS_ORIGIN || '*', // In production, set CORS_ORIGIN to your frontend URL
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
+
+// Error handling middleware for JSON parsing
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    console.error('JSON parsing error:', err.message);
+    return res.status(400).json({ error: 'Invalid JSON' });
+  }
+  next();
+});
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -29,6 +47,7 @@ app.use('/api/roadmaps', roadmapRoutes);
 app.use('/api/snippets', snippetRoutes);
 app.use('/api/chat-history', chatHistoryRoutes);
 app.use('/api/community', communityRoutes);
+app.use('/api/profile', profileRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

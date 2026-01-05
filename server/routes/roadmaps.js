@@ -4,22 +4,29 @@ import { authMiddleware } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get all roadmaps for user
-router.get('/', authMiddleware, async (req, res) => {
+// Get all roadmaps for user and project
+router.get('/:projectId', authMiddleware, async (req, res) => {
   try {
-    const roadmaps = await Roadmap.find({ userId: req.userId }).sort({ createdAt: -1 });
+    console.log('Fetching roadmaps for user:', req.userId, 'project:', req.params.projectId);
+    const roadmaps = await Roadmap.find({ 
+      userId: req.userId,
+      projectId: req.params.projectId 
+    }).sort({ createdAt: -1 });
+    console.log('Found roadmaps:', roadmaps.length);
     res.json(roadmaps);
   } catch (error) {
+    console.error('Error fetching roadmaps:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
 // Create roadmap
-router.post('/', authMiddleware, async (req, res) => {
+router.post('/:projectId', authMiddleware, async (req, res) => {
   try {
     let { topic, nodes, links } = req.body;
+    const projectId = req.params.projectId;
     
-    console.log('Creating roadmap for topic:', topic);
+    console.log('Creating roadmap for topic:', topic, 'project:', projectId);
     
     if (!topic) {
       return res.status(400).json({ error: 'Topic is required' });
@@ -57,6 +64,7 @@ router.post('/', authMiddleware, async (req, res) => {
     
     const roadmap = new Roadmap({
       userId: req.userId,
+      projectId: projectId,
       topic,
       nodes: cleanNodes,
       links: cleanLinks
@@ -72,9 +80,13 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 // Update roadmap node status
-router.put('/:id/nodes/:nodeId', authMiddleware, async (req, res) => {
+router.put('/:projectId/:id/nodes/:nodeId', authMiddleware, async (req, res) => {
   try {
-    const roadmap = await Roadmap.findOne({ _id: req.params.id, userId: req.userId });
+    const roadmap = await Roadmap.findOne({ 
+      _id: req.params.id, 
+      userId: req.userId,
+      projectId: req.params.projectId 
+    });
     if (!roadmap) {
       return res.status(404).json({ error: 'Roadmap not found' });
     }
@@ -92,10 +104,14 @@ router.put('/:id/nodes/:nodeId', authMiddleware, async (req, res) => {
 });
 
 // Generate challenges for a roadmap node
-router.post('/:id/nodes/:nodeId/challenges', authMiddleware, async (req, res) => {
+router.post('/:projectId/:id/nodes/:nodeId/challenges', authMiddleware, async (req, res) => {
   try {
     const { nodeLabel } = req.body;
-    const roadmap = await Roadmap.findOne({ _id: req.params.id, userId: req.userId });
+    const roadmap = await Roadmap.findOne({ 
+      _id: req.params.id, 
+      userId: req.userId,
+      projectId: req.params.projectId 
+    });
     
     if (!roadmap) {
       return res.status(404).json({ error: 'Roadmap not found' });

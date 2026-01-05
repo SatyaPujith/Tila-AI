@@ -14,16 +14,19 @@ interface CodeEditorProps {
   setCode: (c: string) => void;
   language: ProgrammingLanguage;
   setLanguage: (l: ProgrammingLanguage) => void;
-  onRun: (testCases?: TestCase[]) => void;
+  onRun: (testCases?: TestCase[], codeToRun?: string, languageToRun?: ProgrammingLanguage) => void;
   output: string;
   isRunning: boolean;
   executionMode: ExecutionMode;
   setExecutionMode: (m: ExecutionMode) => void;
-  onLanguageChange?: (lang: ProgrammingLanguage) => void;
-  onSaveSnippet?: () => void;
-  onChallengeComplete?: () => void;
+  onLanguageChange?: (lang: ProgrammingLanguage, activeTabId?: string, activeTabContent?: string) => void;
+  onSaveSnippet?: (code: string, language: ProgrammingLanguage) => void;
   fileName?: string;
   onFileNameChange?: (name: string) => void;
+  editorFiles?: Array<{ id: string; name: string; content: string; type: string }>;
+  onRemoveFile?: (fileId: string) => void;
+  onAddFile?: (file: { id: string; name: string; content: string; type: string }) => void;
+  onUpdateFile?: (fileId: string, updates: { name?: string; type?: string; content?: string }) => void;
 }
 
 const BOILERPLATES: Record<ProgrammingLanguage, Record<ExecutionMode, string>> = {
@@ -129,7 +132,7 @@ int solution(vector<int>& arr) {
 
 export const CodeEditor: React.FC<CodeEditorProps> = ({ 
   code, setCode, language, setLanguage, onRun, output: parentOutput, isRunning, executionMode, setExecutionMode,
-  onLanguageChange, onSaveSnippet, onChallengeComplete, fileName, onFileNameChange
+  onLanguageChange, onSaveSnippet, fileName, onFileNameChange, editorFiles = [], onRemoveFile, onAddFile, onUpdateFile
 }) => {
   // Dynamic filename based on language
   const getDefaultFilename = (lang: ProgrammingLanguage): string => {
@@ -159,6 +162,42 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
     { id: 'main', title: fileName || getDefaultFilename(language), content: code, type: 'code', isClosable: false, language: language }
   ]);
   const [activeTabId, setActiveTabId] = useState('main');
+  
+  // Add effect to sync editor files with tabs - update existing tabs and add new ones
+  useEffect(() => {
+    if (editorFiles && editorFiles.length > 0) {
+      setTabs(prev => {
+        // Keep main tab
+        const mainTab = prev.find(t => t.id === 'main');
+        
+        // Create tabs from editorFiles
+        const fileTabs = editorFiles.map(file => ({
+          id: file.id,
+          title: file.name,
+          content: file.content,
+          type: 'code' as const,
+          isClosable: true,
+          language: (file.type as ProgrammingLanguage) || language
+        }));
+        
+        // Update existing tabs with new content/language and keep only tabs that are in editorFiles
+        const updatedOtherTabs = prev
+          .filter(t => t.id !== 'main')
+          .map(existingTab => {
+            const updatedFile = fileTabs.find(ft => ft.id === existingTab.id);
+            return updatedFile ? updatedFile : existingTab;
+          })
+          .filter(t => fileTabs.some(ft => ft.id === t.id));
+        
+        // Add new file tabs that aren't already in tabs
+        const existingTabIds = new Set(prev.map(t => t.id));
+        const newFileTabs = fileTabs.filter(ft => !existingTabIds.has(ft.id));
+        
+        // Return main tab + updated existing file tabs + new file tabs
+        return mainTab ? [mainTab, ...updatedOtherTabs, ...newFileTabs] : [...updatedOtherTabs, ...newFileTabs];
+      });
+    }
+  }, [editorFiles]);
   
   // Get active tab's language (fallback to global language)
   const activeTab = tabs.find(t => t.id === activeTabId);
@@ -190,6 +229,12 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   const [localOutput, setLocalOutput] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Mode cache - store code for each execution mode to preserve when switching
+  const [modeCache, setModeCache] = useState<Record<ExecutionMode, string>>({
+    [ExecutionMode.SCRIPT]: code,
+    [ExecutionMode.FUNCTION]: ''
+  });
+
   // Define finalOutput
   const finalOutput = localOutput || parentOutput;
   
@@ -211,10 +256,14 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   };
   
   const runWithTestCases = () => {
+    // Get the current active tab's code and language
+    const currentContent = tabs.find(t => t.id === activeTabId)?.content || code;
+    const currentLanguage = activeTab?.language || language;
+    
     if (testCases.length > 0) {
-      onRun(testCases);
+      onRun(testCases, currentContent, currentLanguage);
     } else {
-      onRun();
+      onRun(undefined, currentContent, currentLanguage);
     }
   };
   
@@ -323,6 +372,11 @@ Make the test cases realistic and cover edge cases.`
     setTabs(prev => prev.map(t => t.id === 'main' ? { ...t, content: code } : t));
   }, [code]);
 
+  // Update mode cache when code changes
+  useEffect(() => {
+    setModeCache(prev => ({ ...prev, [executionMode]: code }));
+  }, [code, executionMode]);
+
   const handleLanguageChange = (newLang: ProgrammingLanguage) => {
       // Update ONLY the active tab's language and filename
       const currentTab = tabs.find(t => t.id === activeTabId);
@@ -336,26 +390,78 @@ Make the test cases realistic and cover edge cases.`
             t.id === activeTabId ? { ...t, title: newTitle, language: newLang } : t
           ));
           
-          // Only update global language if it's the main tab
+          // Notify parent to update file name and type for file tabs
+          if (activeTabId !== 'main' && onUpdateFile) {
+              onUpdateFile(activeTabId, { name: newTitle, type: newLang });
+          }
+          
+          // Handle language change
           if (activeTabId === 'main') {
+              // Main tab - use the handler
               if (onLanguageChange) {
                   onLanguageChange(newLang);
               } else {
                   setLanguage(newLang);
-                  // Reset to boilerplate for new language
                   setCode(BOILERPLATES[newLang]?.[executionMode] || '');
+              }
+          } else {
+              // File tab - pass tab info to handler
+              const activeTab = tabs.find(t => t.id === activeTabId);
+              if (onLanguageChange && activeTab) {
+                  onLanguageChange(newLang, activeTabId, activeTab.content);
               }
           }
       }
   };
 
-  // Handle mode change - ALWAYS reset to boilerplate
+  // Handle mode change - preserve code by caching per mode
   const handleModeChange = (newMode: ExecutionMode) => {
+      // Save current code to cache before switching
+      if (activeTabId === 'main') {
+          setModeCache(prev => ({ ...prev, [executionMode]: code }));
+      } else {
+          const currentTab = tabs.find(t => t.id === activeTabId);
+          if (currentTab) {
+              setModeCache(prev => ({ ...prev, [executionMode]: currentTab.content }));
+          }
+      }
+      
       setExecutionMode(newMode);
-      // Always reset to the appropriate boilerplate when switching modes
-      const boilerplate = BOILERPLATES[language]?.[newMode] || '';
-      setCode(boilerplate);
-      setLocalOutput(`Switched to ${newMode === ExecutionMode.SCRIPT ? 'Script' : 'Function'} mode. Editor reset to ${language} template.`);
+      
+      // Check if we have cached code for this mode
+      const cachedCode = modeCache[newMode];
+      
+      if (cachedCode && cachedCode.trim()) {
+          // Restore cached code for this mode
+          if (activeTabId === 'main') {
+              setCode(cachedCode);
+          } else {
+              setTabs(prev => prev.map(t => 
+                  t.id === activeTabId ? { ...t, content: cachedCode } : t
+              ));
+              
+              if (onUpdateFile) {
+                  onUpdateFile(activeTabId, { content: cachedCode });
+              }
+          }
+          setLocalOutput(`Switched to ${newMode === ExecutionMode.SCRIPT ? 'Script' : 'Function'} mode. Restored your previous code.`);
+      } else {
+          // No cached code, use boilerplate
+          const boilerplate = BOILERPLATES[activeTabLanguage]?.[newMode] || '';
+          
+          if (activeTabId === 'main') {
+              setCode(boilerplate);
+          } else {
+              setTabs(prev => prev.map(t => 
+                  t.id === activeTabId ? { ...t, content: boilerplate } : t
+              ));
+              
+              if (onUpdateFile) {
+                  onUpdateFile(activeTabId, { content: boilerplate });
+              }
+          }
+          setLocalOutput(`Switched to ${newMode === ExecutionMode.SCRIPT ? 'Script' : 'Function'} mode. Editor reset to ${activeTabLanguage} template.`);
+      }
   };
 
   // Handle Tab Switching & Content Sync
@@ -370,7 +476,7 @@ Make the test cases realistic and cover edge cases.`
     }
   };
 
-  const createTab = (title: string, content: string, type: EditorTab['type'] = 'code', tabLang?: ProgrammingLanguage) => {
+  const createTab = (title: string, content: string, type: EditorTab['type'] = 'code', tabLang?: ProgrammingLanguage, shouldNotify: boolean = true) => {
     const newId = Date.now().toString();
     // Use provided language or inherit from active tab
     const newTabLang = tabLang || activeTabLanguage;
@@ -382,6 +488,17 @@ Make the test cases realistic and cover edge cases.`
     const newTab: EditorTab = { id: newId, title: finalTitle, content, type, isClosable: true, language: newTabLang };
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newId);
+    
+    // Notify parent component to add file to files array (for user-created files, not AI-generated)
+    if (shouldNotify && onAddFile && type === 'code') {
+      onAddFile({
+        id: newId,
+        name: finalTitle,
+        content: content,
+        type: newTabLang
+      });
+    }
+    
     return newId;
   };
 
@@ -389,6 +506,12 @@ Make the test cases realistic and cover edge cases.`
     e.stopPropagation();
     const newTabs = tabs.filter(t => t.id !== id);
     setTabs(newTabs);
+    
+    // Notify parent to remove the file
+    if (onRemoveFile && id !== 'main') {
+      onRemoveFile(id);
+    }
+    
     if (activeTabId === id) {
         setActiveTabId(newTabs[newTabs.length - 1].id);
     }
@@ -406,7 +529,7 @@ Make the test cases realistic and cover edge cases.`
       setLocalOutput("Neural Engine: Analyzing Complexity & Rewriting Logic...");
       try {
           const optimized = await optimizeCode(currentContent, activeTabLanguage);
-          createTab('Optimized', optimized, 'code', activeTabLanguage);
+          createTab('Optimized', optimized, 'code', activeTabLanguage, false);
           setSplitTabId(activeTabId);
           setLocalOutput("Optimization Complete. Opened in new tab.");
       } catch(e) { setLocalOutput("Optimization Failed."); } 
@@ -417,33 +540,17 @@ Make the test cases realistic and cover edge cases.`
       const currentContent = tabs.find(t => t.id === activeTabId)?.content || code;
       if(!currentContent.trim()) return;
       setIsScanning(true);
-      setLocalOutput("🔍 Checking your code for potential issues...");
+      setLocalOutput("🔍 Analyzing code for logical issues, edge cases, and improvements...");
       try {
           const result = await deepScanCode(currentContent, activeTabLanguage);
           
-          // Create a user-friendly report
-          let report = `// CODE ANALYSIS REPORT\n`;
-          report += `// Overall Score: ${result.score}/100\n`;
-          report += `// ${result.summary}\n\n`;
+          // The result.summary now contains the full analysis text from the AI
+          // Create a text file tab with the analysis
+          const analysisText = result.summary || "Analysis failed. Please try again.";
           
-          if (result.issues.length === 0) {
-              report += `// ✅ Great! No issues found in your code.\n`;
-          } else {
-              report += `// Found ${result.issues.length} potential issue(s):\n\n`;
-              result.issues.forEach((issue, index) => {
-                  report += `// ${index + 1}. [${issue.severity}] Line ${issue.line || '?'}\n`;
-                  report += `//    Problem: ${issue.message}\n`;
-                  if (issue.suggestion) {
-                      report += `//    Fix: ${issue.suggestion}\n`;
-                  }
-                  report += `\n`;
-              });
-          }
-          
-          report += `\n// Your original code:\n`;
-          
-          createTab('Code Analysis', report + currentContent, 'code', activeTabLanguage);
-          setLocalOutput(`✅ Analysis complete! Found ${result.issues.length} potential issue(s).`);
+          createTab('Code Analysis', analysisText, 'doc', activeTabLanguage, false);
+          setSplitTabId(activeTabId);
+          setLocalOutput(`✅ Detailed analysis complete! Check the Code Analysis tab for full report.`);
       } catch(e) { 
           setLocalOutput("❌ Analysis failed. Please try again."); 
       } 
@@ -457,7 +564,7 @@ Make the test cases realistic and cover edge cases.`
       setLocalOutput("Generating JSDoc/Docstrings...");
       try {
           const res = await generateDocumentation(currentContent, activeTabLanguage);
-          createTab('Documentation', res, 'doc', activeTabLanguage);
+          createTab('Documentation', res, 'doc', activeTabLanguage, false);
           setSplitTabId(activeTabId);
           setLocalOutput("Documentation generated.");
       } catch(e) { setLocalOutput("Doc Gen Failed."); }
@@ -471,7 +578,7 @@ Make the test cases realistic and cover edge cases.`
       setLocalOutput("🧪 Creating test cases for your code...");
       try {
           const res = await generateUnitTests(currentContent, activeTabLanguage);
-          createTab('Unit Tests', res, 'test', activeTabLanguage);
+          createTab('Unit Tests', res, 'test', activeTabLanguage, false);
           setSplitTabId(activeTabId);
           setLocalOutput("✅ Test cases created! Check the new tab.");
       } catch(e) { setLocalOutput("❌ Failed to create tests. Please try again."); }
@@ -485,7 +592,7 @@ Make the test cases realistic and cover edge cases.`
       setLocalOutput("Neural Engine: Completing logic pattern...");
       try {
           const result = await completeCode(currentContent, activeTabLanguage);
-          createTab('Auto-Complete', result.fixedCode, 'code', activeTabLanguage);
+          createTab('Auto-Complete', result.fixedCode, 'code', activeTabLanguage, false);
           setSplitTabId(activeTabId);
           setLocalOutput(`Completion Ready. ${result.explanation}`);
       } catch(e) { setLocalOutput("Completion Failed."); } 
@@ -596,7 +703,10 @@ Make the test cases realistic and cover edge cases.`
             </div>
         ))}
         <button 
-            onClick={() => createTab('Untitled', '')}
+            onClick={() => {
+                const boilerplate = BOILERPLATES[activeTabLanguage]?.[executionMode] || '';
+                createTab('Untitled', boilerplate, 'code', activeTabLanguage);
+            }}
             className="px-3 text-zinc-500 hover:text-white transition-colors"
             title="New file"
         >
@@ -706,7 +816,11 @@ Make the test cases realistic and cover edge cases.`
             
             {onSaveSnippet && (
                 <button 
-                    onClick={onSaveSnippet} 
+                    onClick={() => {
+                        const currentContent = tabs.find(t => t.id === activeTabId)?.content || code;
+                        const currentLanguage = activeTab?.language || language;
+                        onSaveSnippet(currentContent, currentLanguage);
+                    }}
                     className="p-1.5 text-zinc-500 hover:text-violet-400 transition-colors" 
                     title="Save to Snippets"
                 >
@@ -714,16 +828,6 @@ Make the test cases realistic and cover edge cases.`
                 </button>
             )}
             
-            {onChallengeComplete && (
-                <button 
-                    onClick={onChallengeComplete} 
-                    className="flex items-center gap-1 px-2 py-1 text-[10px] bg-green-600 hover:bg-green-500 text-white rounded transition-colors font-bold" 
-                    title="Mark Challenge Complete & Save to Snippets"
-                >
-                    <CheckCircle className="w-3 h-3" />
-                    Complete
-                </button>
-            )}
             
             <button onClick={() => updateTabContent(activeTabId, '')} className="p-1.5 text-zinc-500 hover:text-white transition-colors" title="Clear Code">
                 <RotateCcw className="w-3.5 h-3.5" />

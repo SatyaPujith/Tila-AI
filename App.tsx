@@ -1,16 +1,117 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { ChatArea } from './components/ChatArea';
-import { SnippetsLibrary } from './components/Notebook';
+import { SnippetsLibrary, FilesLibrary } from './components/Notebook';
+import { ProfilePage } from './components/ProfilePage';
 import { AppMode, CodeSnippet, Message, MessageRole, StudyFile, ViewState, AuthStage, User, ExplanationStyle, CodingChallenge, GraphData, ProgrammingLanguage, Project, CallStatus, CommunityPost, ExecutionMode } from './types';
-import { generateDevResponse, generateCodingChallenges, generateRoadmapData, runCodeSimulation, generateSyllabusContent, convertCodeLanguage } from './services/geminiService';
+import { generateDevResponse, generateCodingChallenges, generateRoadmapData, runCodeSimulation, generateSyllabusContent, convertCodeLanguage, validateChallengeSolution } from './services/geminiService';
 import { decodeAudioData, playAudioBuffer } from './services/audioUtils';
 import { apiService } from './services/apiService';
 import { textToSpeech, playAudioBlob, startSpeechRecognition, getAgentId } from './services/elevenLabsService';
 import { Terminal, Plus, ArrowRight, X, File as FileIcon, Map, Code2, Heart, GitFork, Tag, ArrowLeft, Mail, Lock, User as UserIcon, Users, MessageSquare, Code, Trophy, Play, Send, FileText, Check, Sparkles } from 'lucide-react';
 import { LandingPage } from './components/LandingPage';
 
+// --- BOILERPLATE CODE TEMPLATES ---
+const BOILERPLATES: Record<ProgrammingLanguage, Record<ExecutionMode, string>> = {
+    [ProgrammingLanguage.PYTHON]: {
+        [ExecutionMode.SCRIPT]: `# Main Entry Point
+def main():
+    print("Hello from TILA AI Python!")
+    # Write your code here
 
+if __name__ == "__main__":
+    main()`,
+        [ExecutionMode.FUNCTION]: `def solution(arr):
+    """
+    Write your algorithm here
+    Args:
+        arr: Input array
+    Returns:
+        Processed result
+    """
+    # TODO: Implement your solution
+    return sorted(arr)`
+    },
+    [ProgrammingLanguage.JAVASCRIPT]: {
+        [ExecutionMode.SCRIPT]: `// Main Script Entry Point
+function main() {
+    console.log("Hello from TILA AI JS!");
+    // Write your code here
+}
+
+main();`,
+        [ExecutionMode.FUNCTION]: `/**
+ * Write your algorithm here
+ * @param {Array} arr - Input array
+ * @returns {Array} - Processed result
+ */
+function solution(arr) {
+    // TODO: Implement your solution
+    return arr.sort((a, b) => a - b);
+}`
+    },
+    [ProgrammingLanguage.TYPESCRIPT]: {
+        [ExecutionMode.SCRIPT]: `// Main Script Entry Point
+const main = (): void => {
+    console.log("Hello from TILA AI TS!");
+    // Write your code here
+};
+
+main();`,
+        [ExecutionMode.FUNCTION]: `/**
+ * Write your algorithm here
+ * @param arr - Input array
+ * @returns Processed result
+ */
+function solution(arr: number[]): number[] {
+    // TODO: Implement your solution
+    return arr.sort((a, b) => a - b);
+}`
+    },
+    [ProgrammingLanguage.CPP]: {
+        [ExecutionMode.SCRIPT]: `#include <iostream>
+#include <vector>
+using namespace std;
+
+int main() {
+    cout << "Hello from TILA AI C++" << endl;
+    // Write your code here
+    return 0;
+}`,
+        [ExecutionMode.FUNCTION]: `#include <vector>
+using namespace std;
+
+/**
+ * Write your algorithm here
+ * @param arr Input vector
+ * @return Processed result
+ */
+int solution(vector<int>& arr) {
+    // TODO: Implement your solution
+    return 0;
+}`
+    },
+    [ProgrammingLanguage.JAVA]: {
+        [ExecutionMode.SCRIPT]: `public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello from TILA AI Java!");
+        // Write your code here
+    }
+}`,
+        [ExecutionMode.FUNCTION]: `class Solution {
+    /**
+     * Write your algorithm here
+     * @param arr Input array
+     * @return Processed result
+     */
+    public int[] solution(int[] arr) {
+        // TODO: Implement your solution
+        java.util.Arrays.sort(arr);
+        return arr;
+    }
+}`
+    }
+};
 
 // --- SHARED COMPONENTS ---
 const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false }: any) => {
@@ -119,17 +220,20 @@ interface ConfirmModalProps {
     confirmText?: string;
     cancelText?: string;
     isDanger?: boolean;
+    isLoading?: boolean;
 }
 
-const ConfirmModal: React.FC<ConfirmModalProps> = ({ title, message, onConfirm, onCancel, confirmText = 'Confirm', cancelText = 'Cancel', isDanger = false }) => {
+const ConfirmModal: React.FC<ConfirmModalProps> = ({ title, message, onConfirm, onCancel, confirmText = 'Confirm', cancelText = 'Cancel', isDanger = false, isLoading = false }) => {
     return (
-        <div className="fixed inset-0 z-[250] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn" onClick={onCancel}>
+        <div className="fixed inset-0 z-[250] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn" onClick={isLoading ? undefined : onCancel}>
             <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl shadow-black/50 transform transition-all" onClick={(e) => e.stopPropagation()}>
                 {/* Header with icon */}
                 <div className={`p-6 pb-4 border-b border-zinc-800 ${isDanger ? 'bg-red-950/20' : 'bg-violet-950/20'}`}>
                     <div className="flex items-center gap-4">
                         <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isDanger ? 'bg-red-500/20' : 'bg-violet-500/20'}`}>
-                            {isDanger ? (
+                            {isLoading ? (
+                                <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
+                            ) : isDanger ? (
                                 <X className={`w-6 h-6 ${isDanger ? 'text-red-400' : 'text-violet-400'}`} />
                             ) : (
                                 <Sparkles className="w-6 h-6 text-violet-400" />
@@ -137,7 +241,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({ title, message, onConfirm, 
                         </div>
                         <div>
                             <h3 className="text-xl font-bold text-white">{title}</h3>
-                            <p className="text-xs text-zinc-500 mt-0.5">This action requires confirmation</p>
+                            <p className="text-xs text-zinc-500 mt-0.5">{isLoading ? 'Processing...' : 'This action requires confirmation'}</p>
                         </div>
                     </div>
                 </div>
@@ -149,19 +253,22 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({ title, message, onConfirm, 
                     {/* Actions */}
                     <div className="flex gap-3">
                         <button 
-                            onClick={onCancel} 
-                            className="flex-1 px-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700 transition-all text-sm font-medium"
+                            onClick={onCancel}
+                            disabled={isLoading}
+                            className="flex-1 px-4 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700 transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {cancelText}
                         </button>
                         <button 
-                            onClick={onConfirm} 
-                            className={`flex-1 px-4 py-2.5 rounded-xl text-white text-sm font-bold transition-all ${
+                            onClick={onConfirm}
+                            disabled={isLoading}
+                            className={`flex-1 px-4 py-2.5 rounded-xl text-white text-sm font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
                                 isDanger 
                                     ? 'bg-red-600 hover:bg-red-500 shadow-lg shadow-red-900/30' 
                                     : 'bg-violet-600 hover:bg-violet-500 shadow-lg shadow-violet-900/30'
                             }`}
                         >
+                            {isLoading && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>}
                             {confirmText}
                         </button>
                     </div>
@@ -225,10 +332,9 @@ interface VoiceTranscript {
 
 // --- MODALS ---
 
-const UserProfileModal = ({ user, onClose, isGuestMode }: { user: User, onClose: () => void, isGuestMode?: boolean }) => {
+const UserProfileModal = ({ user, onClose, isGuestMode, onViewFullProfile }: { user: User, onClose: () => void, isGuestMode?: boolean, onViewFullProfile?: () => void }) => {
     const impactScore = (user.problemsSolvedEasy * 10) + (user.problemsSolvedMedium * 30) + (user.problemsSolvedHard * 60);
-    const maxScore = 5000; // Arbitrary max for progress bar
-    const progress = Math.min((impactScore / maxScore) * 100, 100);
+    const totalProblemsSolved = user.problemsSolvedEasy + user.problemsSolvedMedium + user.problemsSolvedHard;
 
     return (
         <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
@@ -262,15 +368,22 @@ const UserProfileModal = ({ user, onClose, isGuestMode }: { user: User, onClose:
                                  </div>
                             </div>
 
-                    <div className="grid grid-cols-2 gap-4 mb-8">
+                    <div className="grid grid-cols-3 gap-4 mb-8">
                         <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-5">
                             <p className="text-xs text-zinc-500 uppercase tracking-wider font-bold mb-2">Impact Score</p>
                             <div className="flex items-end gap-2 mb-2">
                                 <span className="text-3xl font-bold text-white">{impactScore}</span>
-                                <span className="text-xs text-zinc-500 mb-1">/ {maxScore}</span>
+                                <span className="text-xs text-zinc-500 mb-1">/ 5000</span>
                             </div>
                             <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                                <div className="h-full bg-violet-600 rounded-full" style={{ width: `${progress}%` }}></div>
+                                <div className="h-full bg-violet-600 rounded-full" style={{ width: `${Math.min((impactScore / 5000) * 100, 100)}%` }}></div>
+                            </div>
+                        </div>
+                        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-5">
+                            <p className="text-xs text-zinc-500 uppercase tracking-wider font-bold mb-2">Problems Solved</p>
+                            <div className="flex items-end gap-2">
+                                <span className="text-3xl font-bold text-white">{totalProblemsSolved}</span>
+                                <span className="text-sm text-zinc-500 mb-1">total</span>
                             </div>
                         </div>
                          <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-5">
@@ -283,7 +396,7 @@ const UserProfileModal = ({ user, onClose, isGuestMode }: { user: User, onClose:
                     </div>
 
                             <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider">Problem Severity Stats</h3>
-                            <div className="grid grid-cols-3 gap-4">
+                            <div className="grid grid-cols-3 gap-4 mb-6">
                                 <div className="bg-zinc-900/30 border border-zinc-800 p-4 rounded-xl text-center">
                                     <span className="text-green-500 font-bold block text-xl mb-1">{user.problemsSolvedEasy}</span>
                                     <span className="text-xs text-zinc-500 uppercase">Easy</span>
@@ -297,6 +410,10 @@ const UserProfileModal = ({ user, onClose, isGuestMode }: { user: User, onClose:
                                     <span className="text-xs text-zinc-500 uppercase">Hard</span>
                                 </div>
                             </div>
+
+                            <Button onClick={onViewFullProfile} variant="primary" className="w-full">
+                                View Full Profile →
+                            </Button>
                         </>
                     )}
                 </div>
@@ -304,6 +421,7 @@ const UserProfileModal = ({ user, onClose, isGuestMode }: { user: User, onClose:
         </div>
     );
 };
+
 
 // --- DASHBOARD ---
 
@@ -437,14 +555,14 @@ const ProjectDashboard = ({ projects, onCreateProject, onSelectProject, onRename
 
 // --- AUTH SCREENS ---
 
-const LoginScreen = ({ onLogin, onRegister, onBack, error }: { onLogin: (email: string, password: string) => void, onRegister: () => void, onBack: () => void, error: string }) => {
+const LoginScreen = ({ onLogin, onRegister, onBack, error, isLoading }: { onLogin: (email: string, password: string) => void, onRegister: () => void, onBack: () => void, error: string, isLoading?: boolean }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     
     return (
         <div className="min-h-screen bg-black flex items-center justify-center p-4">
             <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-2xl p-8 relative">
-                <button onClick={onBack} className="absolute top-8 left-8 text-zinc-500 hover:text-white flex items-center gap-2 text-xs">
+                <button onClick={onBack} className="absolute top-8 left-8 text-zinc-500 hover:text-white flex items-center gap-2 text-xs disabled:opacity-50" disabled={isLoading}>
                     <ArrowLeft className="w-4 h-4" /> Back
                 </button>
                 <div className="text-center mb-8 mt-6">
@@ -456,21 +574,37 @@ const LoginScreen = ({ onLogin, onRegister, onBack, error }: { onLogin: (email: 
                 </div>
                 <div className="space-y-4">
                     {error && (
-                        <div className="bg-red-900/30 border border-red-500 text-red-200 px-4 py-3 rounded-lg text-sm">
-                            {error}
+                        <div className={`px-4 py-3 rounded-lg text-sm ${isLoading && error.includes('Retrying') ? 'bg-blue-900/30 border border-blue-500 text-blue-200' : 'bg-red-900/30 border border-red-500 text-red-200'}`}>
+                            {isLoading && error.includes('Retrying') ? (
+                                <div className="flex items-center gap-2">
+                                    <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                                    {error}
+                                </div>
+                            ) : (
+                                error
+                            )}
                         </div>
                     )}
                     <div className="relative">
                         <Mail className="absolute left-3 top-3 w-5 h-5 text-zinc-500" />
-                        <Input type="email" placeholder="Email Address" className="pl-10" value={email} onChange={(e: any) => setEmail(e.target.value)} />
+                        <Input type="email" placeholder="Email Address" className="pl-10" value={email} onChange={(e: any) => setEmail(e.target.value)} disabled={isLoading} />
                     </div>
                     <div className="relative">
                         <Lock className="absolute left-3 top-3 w-5 h-5 text-zinc-500" />
-                        <Input type="password" placeholder="Password" className="pl-10" value={password} onChange={(e: any) => setPassword(e.target.value)} />
+                        <Input type="password" placeholder="Password" className="pl-10" value={password} onChange={(e: any) => setPassword(e.target.value)} disabled={isLoading} />
                     </div>
-                    <Button onClick={() => onLogin(email, password)} className="w-full">Sign In</Button>
+                    <Button onClick={() => onLogin(email, password)} className="w-full" disabled={isLoading}>
+                        {isLoading ? (
+                            <div className="flex items-center justify-center gap-2">
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                Signing In...
+                            </div>
+                        ) : (
+                            'Sign In'
+                        )}
+                    </Button>
                     <div className="text-center text-xs text-zinc-500 mt-4">
-                        Don't have an account? <button onClick={onRegister} className="text-violet-400 hover:underline">Register</button>
+                        Don't have an account? <button onClick={onRegister} className="text-violet-400 hover:underline disabled:opacity-50" disabled={isLoading}>Register</button>
                     </div>
                 </div>
             </div>
@@ -478,7 +612,7 @@ const LoginScreen = ({ onLogin, onRegister, onBack, error }: { onLogin: (email: 
     );
 };
 
-const RegisterScreen = ({ onRegister, onLogin, onBack, error }: { onRegister: (name: string, email: string, password: string) => void, onLogin: () => void, onBack: () => void, error: string }) => {
+const RegisterScreen = ({ onRegister, onLogin, onBack, error, isLoading }: { onRegister: (name: string, email: string, password: string) => void, onLogin: () => void, onBack: () => void, error: string, isLoading?: boolean }) => {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -501,7 +635,7 @@ const RegisterScreen = ({ onRegister, onLogin, onBack, error }: { onRegister: (n
     return (
          <div className="min-h-screen bg-black flex items-center justify-center p-4">
             <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-2xl p-8 relative">
-                <button onClick={onBack} className="absolute top-8 left-8 text-zinc-500 hover:text-white flex items-center gap-2 text-xs">
+                <button onClick={onBack} className="absolute top-8 left-8 text-zinc-500 hover:text-white flex items-center gap-2 text-xs disabled:opacity-50" disabled={isLoading}>
                     <ArrowLeft className="w-4 h-4" /> Back
                 </button>
                 <div className="text-center mb-8 mt-6">
@@ -513,29 +647,45 @@ const RegisterScreen = ({ onRegister, onLogin, onBack, error }: { onRegister: (n
                 </div>
                 <div className="space-y-4">
                     {(error || localError) && (
-                        <div className="bg-red-900/30 border border-red-500 text-red-200 px-4 py-3 rounded-lg text-sm">
-                            {error || localError}
+                        <div className={`px-4 py-3 rounded-lg text-sm ${isLoading && error?.includes('Retrying') ? 'bg-blue-900/30 border border-blue-500 text-blue-200' : 'bg-red-900/30 border border-red-500 text-red-200'}`}>
+                            {isLoading && error?.includes('Retrying') ? (
+                                <div className="flex items-center gap-2">
+                                    <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                                    {error}
+                                </div>
+                            ) : (
+                                error || localError
+                            )}
                         </div>
                     )}
                     <div className="relative">
                         <UserIcon className="absolute left-3 top-3 w-5 h-5 text-zinc-500" />
-                        <Input type="text" placeholder="Full Name" className="pl-10" value={name} onChange={(e: any) => setName(e.target.value)} />
+                        <Input type="text" placeholder="Full Name" className="pl-10" value={name} onChange={(e: any) => setName(e.target.value)} disabled={isLoading} />
                     </div>
                     <div className="relative">
                         <Mail className="absolute left-3 top-3 w-5 h-5 text-zinc-500" />
-                        <Input type="email" placeholder="Email Address" className="pl-10" value={email} onChange={(e: any) => setEmail(e.target.value)} />
+                        <Input type="email" placeholder="Email Address" className="pl-10" value={email} onChange={(e: any) => setEmail(e.target.value)} disabled={isLoading} />
                     </div>
                     <div className="relative">
                         <Lock className="absolute left-3 top-3 w-5 h-5 text-zinc-500" />
-                        <Input type="password" placeholder="Password" className="pl-10" value={password} onChange={(e: any) => setPassword(e.target.value)} />
+                        <Input type="password" placeholder="Password" className="pl-10" value={password} onChange={(e: any) => setPassword(e.target.value)} disabled={isLoading} />
                     </div>
                     <div className="relative">
                         <Lock className="absolute left-3 top-3 w-5 h-5 text-zinc-500" />
-                        <Input type="password" placeholder="Confirm Password" className="pl-10" value={confirmPassword} onChange={(e: any) => setConfirmPassword(e.target.value)} />
+                        <Input type="password" placeholder="Confirm Password" className="pl-10" value={confirmPassword} onChange={(e: any) => setConfirmPassword(e.target.value)} disabled={isLoading} />
                     </div>
-                    <Button onClick={handleSubmit} className="w-full">Create Account</Button>
+                    <Button onClick={handleSubmit} className="w-full" disabled={isLoading}>
+                        {isLoading ? (
+                            <div className="flex items-center justify-center gap-2">
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                Creating Account...
+                            </div>
+                        ) : (
+                            'Create Account'
+                        )}
+                    </Button>
                     <div className="text-center text-xs text-zinc-500 mt-4">
-                        Already have an account? <button onClick={onLogin} className="text-violet-400 hover:underline">Sign In</button>
+                        Already have an account? <button onClick={onLogin} className="text-violet-400 hover:underline disabled:opacity-50" disabled={isLoading}>Sign In</button>
                     </div>
                 </div>
             </div>
@@ -545,7 +695,7 @@ const RegisterScreen = ({ onRegister, onLogin, onBack, error }: { onRegister: (n
 
 // --- VIEWS ---
 
-const ChallengesView = ({ files, onXPChange, onLoadChallenge, isGuestMode, userChallenges, onRefresh, onShowNotification }: { files: StudyFile[], onXPChange: (n: number) => void, onLoadChallenge: (c: CodingChallenge) => void, isGuestMode: boolean, userChallenges: any[], onRefresh: () => void, onShowNotification: (msg: string, type: 'success' | 'error' | 'info' | 'warning') => void }) => {
+const ChallengesView = ({ files, onXPChange, onLoadChallenge, isGuestMode, userChallenges, onRefresh, onShowNotification, onSaveChallenges }: { files: StudyFile[], onXPChange: (n: number) => void, onLoadChallenge: (c: CodingChallenge) => void, isGuestMode: boolean, userChallenges: any[], onRefresh: () => void, onShowNotification: (msg: string, type: 'success' | 'error' | 'info' | 'warning') => void, onSaveChallenges?: (challenges: CodingChallenge[]) => void }) => {
     const [challenges, setChallenges] = useState<CodingChallenge[]>([]);
     const [loading, setLoading] = useState(false);
     const [manualTopic, setManualTopic] = useState('');
@@ -588,10 +738,20 @@ const ChallengesView = ({ files, onXPChange, onLoadChallenge, isGuestMode, userC
                 return;
             }
             
-            setChallenges(newChallenges);
+            // Add topic to each challenge
+            const challengesWithTopic = newChallenges.map((c: any) => ({
+                ...c,
+                topic: topic,
+                id: c.id || Date.now().toString() + Math.random().toString(36).substr(2, 9)
+            }));
             
-            // Note: Challenges are now saved per-notebook in the project itself via handleGenerateChallengesForNode
-            // No need to save to global backend - this ensures per-notebook isolation
+            setChallenges(challengesWithTopic);
+            
+            // Save challenges via callback
+            if (onSaveChallenges) {
+                onSaveChallenges(challengesWithTopic);
+            }
+            
             onShowNotification(`Generated ${newChallenges.length} challenges for "${topic}"!`, "success");
         } catch (error) {
             console.error('Challenge generation failed:', error);
@@ -659,10 +819,13 @@ const ChallengesView = ({ files, onXPChange, onLoadChallenge, isGuestMode, userC
                                     <div className="flex items-center gap-3 mb-2">
                                         <h3 className="text-lg font-bold text-white">{c.title}</h3>
                                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${c.difficulty === 'Easy' ? 'bg-green-500/10 text-green-500' : c.difficulty === 'Medium' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-red-500/10 text-red-500'}`}>{c.difficulty}</span>
+                                        {c.completed && <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-green-500/20 text-green-400">✅ Solved</span>}
                                     </div>
                                     <p className="text-sm text-zinc-500 line-clamp-1">{c.description}</p>
                                 </div>
-                                <Button onClick={() => onLoadChallenge(c)} variant="outline" className="h-9 text-xs">Solve</Button>
+                                <Button onClick={() => onLoadChallenge(c)} variant="outline" className="h-9 text-xs">
+                                    {c.completed ? 'Retry' : 'Solve'}
+                                </Button>
                             </div>
                         ))}
                     </div>
@@ -680,10 +843,13 @@ const ChallengesView = ({ files, onXPChange, onLoadChallenge, isGuestMode, userC
                                     <div className="flex items-center gap-3 mb-2">
                                         <h3 className="text-lg font-bold text-white">{c.title}</h3>
                                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${c.difficulty === 'Easy' ? 'bg-green-500/10 text-green-500' : c.difficulty === 'Medium' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-red-500/10 text-red-500'}`}>{c.difficulty}</span>
+                                        {c.completed && <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-green-500/20 text-green-400">✅ Solved</span>}
                                     </div>
                                     <p className="text-sm text-zinc-500 line-clamp-1">{c.description}</p>
                                 </div>
-                                <Button onClick={() => onLoadChallenge(c)} variant="outline" className="h-9 text-xs">Solve</Button>
+                                <Button onClick={() => onLoadChallenge(c)} variant="outline" className="h-9 text-xs">
+                                    {c.completed ? 'Retry' : 'Solve'}
+                                </Button>
                             </div>
                         ))}
                     </div>
@@ -699,6 +865,13 @@ const RoadmapView = ({ files, isGuestMode, onGenerateChallengesForNode, onSendTo
     const [topic, setTopic] = React.useState('');
     const [roadmapId, setRoadmapId] = React.useState<string | null>(null);
     const [selectedRoadmap, setSelectedRoadmap] = React.useState<any | null>(null);
+    const [localRoadmaps, setLocalRoadmaps] = React.useState<any[]>(userRoadmaps || []);
+
+    // Sync local roadmaps with prop
+    React.useEffect(() => {
+        console.log('RoadmapView: userRoadmaps prop changed:', userRoadmaps);
+        setLocalRoadmaps(userRoadmaps || []);
+    }, [userRoadmaps]);
 
     const generate = async () => {
         if (!topic && files.length === 0) {
@@ -763,83 +936,64 @@ const RoadmapView = ({ files, isGuestMode, onGenerateChallengesForNode, onSendTo
 
     const [searchQuery, setSearchQuery] = React.useState('');
     
-    const filteredRoadmaps = userRoadmaps.filter(roadmap => 
+    const filteredRoadmaps = localRoadmaps.filter(roadmap => 
         roadmap.topic?.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
     return (
         <div className="flex-1 flex flex-col bg-black overflow-hidden">
             {!data && !selectedRoadmap ? (
-                <div className="flex-1 overflow-y-auto p-8 md:p-12 custom-scrollbar">
-                    <div className="max-w-4xl mx-auto">
-                        <div className="text-center mb-12">
-                            <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mx-auto mb-4">
-                                <Map className="w-8 h-8 text-violet-500" />
-                            </div>
-                            <h2 className="text-3xl font-bold text-white mb-2">Learning Roadmaps</h2>
-                            <p className="text-zinc-500">Visual learning paths to master any topic step by step.</p>
-                        </div>
+                <div className="flex-1 p-12 overflow-y-auto custom-scrollbar bg-black">
+                    <div className="max-w-4xl mx-auto text-center mb-12">
+                        <h2 className="text-3xl font-bold text-white mb-4">Learning Roadmaps</h2>
+                        <p className="text-zinc-500 mb-8">Visual learning paths to master any topic step by step.</p>
                         
-                        {userRoadmaps.length > 0 && (
-                            <div className="mb-12">
-                                <div className="flex items-center justify-between mb-6">
-                                    <h3 className="text-xl font-bold text-white">Your Roadmaps</h3>
-                                    <div className="relative w-64">
-                                        <input
-                                            type="text"
-                                            value={searchQuery}
-                                            onChange={(e) => setSearchQuery(e.target.value)}
-                                            placeholder="Search roadmaps..."
-                                            className="w-full h-9 bg-zinc-900/50 border border-zinc-800 rounded-lg px-3 text-sm text-white focus:outline-none focus:border-violet-500 placeholder-zinc-600"
-                                        />
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {filteredRoadmaps.map(roadmap => (
-                                        <div 
-                                            key={roadmap._id}
-                                            onClick={() => loadRoadmap(roadmap)}
-                                            className="p-6 rounded-2xl bg-zinc-900/30 border border-zinc-800 hover:border-violet-500 cursor-pointer transition-all group"
-                                        >
-                                            <div className="flex items-center gap-3 mb-3">
-                                                <div className="w-10 h-10 rounded-xl bg-violet-600/20 border border-violet-500/30 flex items-center justify-center">
-                                                    <Map className="w-5 h-5 text-violet-400" />
-                                                </div>
-                                                <div>
-                                                    <h4 className="font-bold text-white group-hover:text-violet-400 transition-colors">{roadmap.topic}</h4>
-                                                    <p className="text-xs text-zinc-500">{roadmap.nodes?.length || 0} concepts</p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center justify-between text-xs text-zinc-600">
-                                                <span>Click to view</span>
-                                                <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity text-violet-400" />
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                                {filteredRoadmaps.length === 0 && searchQuery && (
-                                    <div className="text-center py-8 text-zinc-500">
-                                        No roadmaps found matching "{searchQuery}"
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                        
-                        <div className="bg-zinc-900/30 border border-zinc-800 rounded-2xl p-8 text-center">
-                            <h3 className="text-lg font-bold text-white mb-4">Create New Roadmap</h3>
-                            <div className="max-w-md mx-auto mb-4">
-                                <Input 
-                                    value={topic} 
-                                    onChange={(e: any) => setTopic(e.target.value)} 
-                                    placeholder="Enter Topic (e.g. React.js, Machine Learning)" 
-                                    className="text-center"
-                                />
-                            </div>
-                            <Button onClick={generate} disabled={!topic || loading} className="mx-auto">
-                                {loading ? 'Generating...' : 'Generate Roadmap'}
-                            </Button>
+                        <div className="max-w-md mx-auto mb-6">
+                            <Input 
+                                value={topic} 
+                                onChange={(e: any) => setTopic(e.target.value)} 
+                                placeholder="Enter Topic (e.g. React.js, Machine Learning)" 
+                                className="text-center"
+                            />
                         </div>
+                        <Button onClick={generate} disabled={!topic || loading} className="mx-auto">
+                            {loading ? 'Generating...' : 'Generate Roadmap'}
+                        </Button>
                     </div>
+                        
+                    {localRoadmaps && localRoadmaps.length > 0 && (
+                        <div className="max-w-4xl mx-auto mb-8">
+                            <div className="flex items-center justify-between mb-6">
+                                <h3 className="text-xl font-bold text-white">Your Roadmaps ({localRoadmaps.length})</h3>
+                                <div className="relative w-64">
+                                    <input
+                                        type="text"
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        placeholder="Search roadmaps..."
+                                        className="w-full h-9 bg-zinc-900/50 border border-zinc-800 rounded-lg px-3 text-sm text-white focus:outline-none focus:border-violet-500 placeholder-zinc-600"
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                {filteredRoadmaps.map(roadmap => (
+                                    <div 
+                                        key={roadmap._id}
+                                        onClick={() => loadRoadmap(roadmap)}
+                                        className="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800 hover:border-violet-500 cursor-pointer transition-all"
+                                    >
+                                        <h4 className="font-bold text-white mb-1">{roadmap.topic}</h4>
+                                        <p className="text-sm text-zinc-500">{roadmap.nodes?.length || 0} concepts</p>
+                                    </div>
+                                ))}
+                            </div>
+                            {filteredRoadmaps.length === 0 && searchQuery && (
+                                <div className="text-center py-8 text-zinc-500">
+                                    No roadmaps found matching "{searchQuery}"
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             ) : (
                 <div className="flex-1 flex flex-col overflow-hidden">
@@ -1123,11 +1277,13 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isGuestMode, setIsGuestMode] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
   
   // Project Management
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [showProfilePage, setShowProfilePage] = useState(false);
 
   // View State (Derived from active project or default)
   const [viewState, setViewState] = useState<ViewState>(ViewState.IDE);
@@ -1139,6 +1295,7 @@ export default function App() {
   const [snippets, setSnippets] = useState<CodeSnippet[]>([]);
   const [userChallenges, setUserChallenges] = useState<any[]>([]);
   const [userRoadmaps, setUserRoadmaps] = useState<any[]>([]);
+  const [roadmapsLoading, setRoadmapsLoading] = useState(false);
   
   // Chat History Management
   const [chatSessions, setChatSessions] = useState<any[]>([]);
@@ -1147,7 +1304,7 @@ export default function App() {
   
   // Notification & Modal System
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
-  const [confirmModal, setConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void; onCancel?: () => void; confirmText?: string; cancelText?: string; isDanger?: boolean } | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void; onCancel?: () => void; confirmText?: string; cancelText?: string; isDanger?: boolean; isLoading?: boolean } | null>(null);
   const [inputModal, setInputModal] = useState<{ title: string; message: string; placeholder?: string; onSubmit: (value: string) => void } | null>(null);
   
   // Helper functions for notifications
@@ -1184,27 +1341,14 @@ export default function App() {
   const audioContextRef = useRef<AudioContext | null>(null);
   useEffect(() => { audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)(); }, []);
 
-  // Check authentication on mount and persist token
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      apiService.setToken(token); // Ensure token is set in API service
-      loadUserData();
-    }
-  }, []);
-
-  // Load chat history when user is authenticated (challenges/roadmaps/snippets are loaded per-project)
-  useEffect(() => {
-    if (user && !isGuestMode) {
-      loadChatHistory();
-    }
-  }, [user, isGuestMode]);
-
-  // --- HANDLERS ---
+  // --- HANDLERS (defined before useEffects) ---
 
   const loadUserData = async (showWelcome: boolean = false) => {
     try {
+      console.log('loadUserData called with showWelcome:', showWelcome);
       const userData = await apiService.getCurrentUser();
+      console.log('Got user data:', userData);
+      
       setUser({
         id: userData.id,
         name: userData.name || userData.username,
@@ -1221,7 +1365,10 @@ export default function App() {
       setAuthStage(AuthStage.DASHBOARD_SELECTION);
       
       // Load user's projects with their associated data
+      console.log('Loading projects...');
       const projectsData = await apiService.getProjects();
+      console.log('Got projects:', projectsData.length);
+      
       setProjects(projectsData.map((p: any) => ({
         id: p._id || p.id,
         title: p.title,
@@ -1235,6 +1382,9 @@ export default function App() {
         challenges: p.challenges || [],
         roadmaps: p.roadmaps || []
       })));
+
+      // Roadmaps are now loaded per-project, not globally
+      setUserRoadmaps([]);
       
       if (showWelcome) {
         showNotification(`Welcome back, ${userData.name || userData.username}!`, 'success');
@@ -1246,21 +1396,63 @@ export default function App() {
     }
   };
 
+  // Check authentication on mount and persist token
+  useEffect(() => {
+    console.log('Auth check useEffect running');
+    const token = localStorage.getItem('token');
+    console.log('Token from localStorage:', token ? 'exists' : 'not found');
+    if (token) {
+      console.log('Setting token and calling loadUserData');
+      apiService.setToken(token); // Ensure token is set in API service
+      loadUserData();
+    }
+  }, []);
+
+  // Load chat history when user is authenticated (challenges/roadmaps/snippets are loaded per-project)
+  useEffect(() => {
+    if (user && !isGuestMode) {
+      loadChatHistory();
+    }
+  }, [user, isGuestMode]);
+
+  // Load roadmaps when user is authenticated
+  useEffect(() => {
+    if (user && !isGuestMode && authStage === AuthStage.WORKSPACE && activeProjectId) {
+      console.log('Loading roadmaps for authenticated user and project:', activeProjectId);
+      setRoadmapsLoading(true);
+      apiService.getRoadmaps(activeProjectId)
+        .then(roadmaps => {
+          console.log('Roadmaps loaded in useEffect:', roadmaps);
+          console.log('Roadmaps type:', typeof roadmaps);
+          console.log('Is array:', Array.isArray(roadmaps));
+          
+          if (Array.isArray(roadmaps)) {
+            console.log('Setting userRoadmaps with', roadmaps.length, 'items');
+            setUserRoadmaps(roadmaps);
+            console.log('State update called');
+          } else {
+            console.warn('Roadmaps response is not an array:', roadmaps);
+            setUserRoadmaps([]);
+          }
+        })
+        .catch(error => {
+          console.error('Failed to load roadmaps in useEffect:', error);
+          console.error('Error message:', error.message);
+          console.error('Error stack:', error.stack);
+          setUserRoadmaps([]);
+        })
+        .finally(() => {
+          setRoadmapsLoading(false);
+        });
+    }
+  }, [user, isGuestMode, authStage, activeProjectId]);
+
   const loadUserChallenges = async () => {
     try {
       const challenges = await apiService.getChallenges();
       setUserChallenges(challenges);
     } catch (error) {
       console.error('Failed to load challenges:', error);
-    }
-  };
-
-  const loadUserRoadmaps = async () => {
-    try {
-      const roadmaps = await apiService.getRoadmaps();
-      setUserRoadmaps(roadmaps);
-    } catch (error) {
-      console.error('Failed to load roadmaps:', error);
     }
   };
 
@@ -1282,53 +1474,117 @@ export default function App() {
   };
 
   const handleLogin = async (email: string, password: string) => {
-    try {
-      setAuthError('');
-      const response = await apiService.login(email, password);
-      
-      // Ensure token is properly saved
-      if (response.token) {
-        localStorage.setItem('token', response.token);
-        apiService.setToken(response.token);
+    setIsAuthLoading(true);
+    setAuthError('');
+    
+    const maxRetries = 3;
+    let lastError: any = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await apiService.login(email, password);
+        
+        // Ensure token is properly saved
+        if (response.token) {
+          localStorage.setItem('token', response.token);
+          apiService.setToken(response.token);
+        }
+        
+        setIsGuestMode(false);
+        setIsAuthLoading(false);
+        await loadUserData(true); // Show welcome notification
+        return;
+      } catch (error: any) {
+        lastError = error;
+        console.error(`Login attempt ${attempt} failed:`, error);
+        
+        // Check if it's a server connection error
+        const isConnectionError = error.message?.includes('Failed to fetch') || 
+                                 error.message?.includes('ERR_CONNECTION_REFUSED') ||
+                                 error.message?.includes('ECONNREFUSED') ||
+                                 error.status === 0;
+        
+        // If it's a connection error and not the last attempt, retry
+        if (isConnectionError && attempt < maxRetries) {
+          setAuthError(`Server connection failed. Retrying... (Attempt ${attempt}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, 1500)); // Wait 1.5 seconds before retry
+          continue;
+        }
+        
+        // If it's the last attempt or not a connection error, break
+        break;
       }
-      
-      setIsGuestMode(false);
-      await loadUserData(true); // Show welcome notification
-    } catch (error: any) {
-      console.error('Login failed:', error);
-      const errorMessage = error.message || 'Login failed';
-      if (errorMessage.includes('Invalid credentials') || errorMessage.includes('400')) {
-        setAuthError('Invalid email or password. Please try again.');
-      } else if (errorMessage.includes('not found') || errorMessage.includes('404')) {
-        setAuthError('No account found with this email. Please register first.');
-      } else {
-        setAuthError('Login failed. Please try again later.');
-      }
+    }
+    
+    // Handle final error
+    setIsAuthLoading(false);
+    const errorMessage = lastError?.message || 'Login failed';
+    
+    if (errorMessage.includes('Failed to fetch') || errorMessage.includes('ERR_CONNECTION_REFUSED') || errorMessage.includes('ECONNREFUSED')) {
+      setAuthError('Server is not responding. Please ensure the backend server is running and try again.');
+    } else if (errorMessage.includes('Invalid credentials') || errorMessage.includes('400')) {
+      setAuthError('Invalid email or password. Please try again.');
+    } else if (errorMessage.includes('not found') || errorMessage.includes('404')) {
+      setAuthError('No account found with this email. Please register first.');
+    } else {
+      setAuthError('Login failed. Please try again later.');
     }
   };
 
   const handleRegister = async (name: string, email: string, password: string) => {
-    try {
-      setAuthError('');
-      const response = await apiService.register(name, email, password);
-      
-      // Ensure token is properly saved
-      if (response.token) {
-        localStorage.setItem('token', response.token);
-        apiService.setToken(response.token);
+    setIsAuthLoading(true);
+    setAuthError('');
+    
+    const maxRetries = 3;
+    let lastError: any = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await apiService.register(name, email, password);
+        
+        // Ensure token is properly saved
+        if (response.token) {
+          localStorage.setItem('token', response.token);
+          apiService.setToken(response.token);
+        }
+        
+        setIsGuestMode(false);
+        setIsAuthLoading(false);
+        await loadUserData(false);
+        showNotification(`Welcome to TILA AI, ${name}!`, 'success');
+        return;
+      } catch (error: any) {
+        lastError = error;
+        console.error(`Registration attempt ${attempt} failed:`, error);
+        
+        // Check if it's a server connection error
+        const isConnectionError = error.message?.includes('Failed to fetch') || 
+                                 error.message?.includes('ERR_CONNECTION_REFUSED') ||
+                                 error.message?.includes('ECONNREFUSED') ||
+                                 error.status === 0;
+        
+        // If it's a connection error and not the last attempt, retry
+        if (isConnectionError && attempt < maxRetries) {
+          setAuthError(`Server connection failed. Retrying... (Attempt ${attempt}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, 1500)); // Wait 1.5 seconds before retry
+          continue;
+        }
+        
+        // If it's the last attempt or not a connection error, break
+        break;
       }
-      
-      setIsGuestMode(false);
-      await loadUserData(false);
-      showNotification(`Welcome to TILA AI, ${name}!`, 'success');
-    } catch (error: any) {
-      console.error('Registration failed:', error);
-      const errorMessage = error.message || 'Registration failed';
-      if (errorMessage.includes('already exists') || errorMessage.includes('400')) {
-        setAuthError('An account with this email already exists. Please login instead.');
-      } else {
-        setAuthError('Registration failed. Please try again.');
-      }
+    }
+    
+    // Handle final error
+    setIsAuthLoading(false);
+    const errorMessage = lastError?.message || 'Registration failed';
+    
+    if (errorMessage.includes('Failed to fetch') || errorMessage.includes('ERR_CONNECTION_REFUSED') || errorMessage.includes('ECONNREFUSED')) {
+      setAuthError('Server is not responding. Please ensure the backend server is running and try again.');
+    } else if (errorMessage.includes('already exists') || errorMessage.includes('400')) {
+      setAuthError('An account with this email already exists. Please login instead.');
+    } else {
+      setAuthError('Registration failed. Please try again.');
     }
   };
 
@@ -1424,8 +1680,18 @@ export default function App() {
           // Load project-specific data ONLY from the project itself (per-notebook isolation)
           // Do NOT load from global user data - each notebook has its own data
           setUserChallenges((p as any).challenges || []);
-          setUserRoadmaps((p as any).roadmaps || []);
           setSnippets(p.snippets || []);
+          
+          // Load roadmaps for this project from the Roadmap collection
+          try {
+            console.log('Loading roadmaps for project:', p.id);
+            const roadmaps = await apiService.getRoadmaps(p.id);
+            console.log('Loaded project roadmaps:', roadmaps);
+            setUserRoadmaps(Array.isArray(roadmaps) ? roadmaps : []);
+          } catch (error) {
+            console.error('Failed to load project roadmaps:', error);
+            setUserRoadmaps([]);
+          }
           
           setAuthStage(AuthStage.WORKSPACE);
       }
@@ -1789,45 +2055,58 @@ ${conversationLog}
   };
 
   // Smart Code Caching - Save code when language changes
-  const handleLanguageChange = async (newLang: ProgrammingLanguage) => {
-      // Save current code to cache
-      setCodeCache(prev => ({ ...prev, [language]: code }));
+  const handleLanguageChange = async (newLang: ProgrammingLanguage, activeTabId?: string, activeTabContent?: string) => {
+      // Determine if we're working with a file tab or main code
+      const isFileTab = activeTabId && activeTabId !== 'main';
+      const currentCode = activeTabContent !== undefined ? activeTabContent : code;
+      const currentLang = language;
       
-      // Check if we have cached code for the new language
-      if (codeCache[newLang]) {
-          setCode(codeCache[newLang]);
-          setLanguage(newLang);
-          showNotification(`Switched to ${newLang}. Loaded cached code.`, 'info');
-      } else {
-          // Offer to convert code if there's substantial code
-          if (code.trim() && code.length > 30) {
+      if (isFileTab && activeTabId) {
+          // Handle file tab language change
+          if (currentCode.trim() && currentCode.length > 30) {
               setConfirmModal({
                   title: 'Convert Code?',
-                  message: `Would you like to convert your ${language} code to ${newLang}? Click "Convert" to translate your code, or "Start Fresh" to begin with a clean template.`,
+                  message: `Would you like to convert your ${currentLang} code to ${newLang}? Click "Convert" to translate your code, or "Start Fresh" to begin with a clean template.`,
                   confirmText: 'Convert',
                   cancelText: 'Start Fresh',
                   isDanger: false,
                   onConfirm: async () => {
                       setEditorOutput("Converting code...");
+                      // Set loading state in modal
+                      setConfirmModal(prev => prev ? { ...prev, isLoading: true } : null);
                       try {
-                          const converted = await convertCodeLanguage(code, language, newLang);
-                          setCode(converted);
-                          setCodeCache(prev => ({ ...prev, [newLang]: converted }));
-                          setEditorOutput(`Code converted from ${language} to ${newLang} successfully!`);
+                          const converted = await convertCodeLanguage(currentCode, currentLang, newLang);
+                          // Update the file in the files array with converted code and new language
+                          setFiles(prev => prev.map(f => 
+                              f.id === activeTabId 
+                                  ? { ...f, content: converted, type: newLang }
+                                  : f
+                          ));
+                          // DO NOT update main code/language state for file tabs
+                          setEditorOutput(`Code converted from ${currentLang} to ${newLang} successfully!`);
                           showNotification(`Code converted to ${newLang} successfully!`, 'success');
                       } catch (error) {
+                          console.error('Conversion error:', error);
                           setEditorOutput("Conversion failed. Starting with template.");
-                          setCode('');
+                          setFiles(prev => prev.map(f => 
+                              f.id === activeTabId 
+                                  ? { ...f, content: '', type: newLang }
+                                  : f
+                          ));
+                          // DO NOT update main code/language state for file tabs
                           showNotification('Conversion failed. Starting fresh.', 'error');
                       }
-                      setLanguage(newLang);
                       setConfirmModal(null);
                   },
                   onCancel: () => {
-                      // Start Fresh - clear code and switch to new language
-                      setCode(''); // Clear the code
-                      setLanguage(newLang); // Switch to new language
-                      setCodeCache(prev => ({ ...prev, [newLang]: '' })); // Clear cache for new language
+                      // Start Fresh - provide boilerplate code for the new language
+                      const boilerplate = BOILERPLATES[newLang]?.[executionMode] || '';
+                      setFiles(prev => prev.map(f => 
+                          f.id === activeTabId 
+                              ? { ...f, content: boilerplate, type: newLang }
+                              : f
+                      ));
+                      // DO NOT update main code/language state for file tabs
                       setEditorOutput('');
                       showNotification(`Started fresh with ${newLang}`, 'info');
                       setConfirmModal(null);
@@ -1836,70 +2115,76 @@ ${conversationLog}
           } else {
               // No substantial code, just switch language
               setLanguage(newLang);
-              setCode(''); // Will be filled by CodeEditor boilerplate
+              setFiles(prev => prev.map(f => 
+                  f.id === activeTabId 
+                      ? { ...f, type: newLang }
+                      : f
+              ));
               showNotification(`Switched to ${newLang}`, 'info');
+          }
+      } else {
+          // Handle main code language change (original logic)
+          setCodeCache(prev => ({ ...prev, [language]: code }));
+          
+          if (codeCache[newLang]) {
+              setCode(codeCache[newLang]);
+              setLanguage(newLang);
+              showNotification(`Switched to ${newLang}. Loaded cached code.`, 'info');
+          } else {
+              if (code.trim() && code.length > 30) {
+                  setConfirmModal({
+                      title: 'Convert Code?',
+                      message: `Would you like to convert your ${language} code to ${newLang}? Click "Convert" to translate your code, or "Start Fresh" to begin with a clean template.`,
+                      confirmText: 'Convert',
+                      cancelText: 'Start Fresh',
+                      isDanger: false,
+                      onConfirm: async () => {
+                          setEditorOutput("Converting code...");
+                          // Set loading state in modal
+                          setConfirmModal(prev => prev ? { ...prev, isLoading: true } : null);
+                          try {
+                              const converted = await convertCodeLanguage(code, language, newLang);
+                              setCode(converted);
+                              setCodeCache(prev => ({ ...prev, [newLang]: converted }));
+                              setEditorOutput(`Code converted from ${language} to ${newLang} successfully!`);
+                              showNotification(`Code converted to ${newLang} successfully!`, 'success');
+                          } catch (error) {
+                              setEditorOutput("Conversion failed. Starting with template.");
+                              setCode('');
+                              showNotification('Conversion failed. Starting fresh.', 'error');
+                          }
+                          setLanguage(newLang);
+                          setConfirmModal(null);
+                      },
+                      onCancel: () => {
+                          const boilerplate = BOILERPLATES[newLang]?.[executionMode] || '';
+                          setCode(boilerplate);
+                          setLanguage(newLang);
+                          setCodeCache(prev => ({ ...prev, [newLang]: boilerplate }));
+                          setEditorOutput('');
+                          showNotification(`Started fresh with ${newLang}`, 'info');
+                          setConfirmModal(null);
+                      }
+                  });
+              } else {
+                  const boilerplate = BOILERPLATES[newLang]?.[executionMode] || '';
+                  setLanguage(newLang);
+                  setCode(boilerplate);
+                  setCodeCache(prev => ({ ...prev, [newLang]: boilerplate }));
+                  showNotification(`Switched to ${newLang}`, 'info');
+              }
           }
       }
   };
   
   // Clear cache when challenge is completed and save to snippets
-  const handleChallengeComplete = async () => {
-      if (!code.trim()) {
-          showNotification('No code to save. Write some code first!', 'warning');
-          return;
-      }
-      
-      showNotification('Generating solution explanation...', 'info');
-      
-      // Generate AI explanation for the solution
-      let aiExplanation = '';
-      try {
-          const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent', {
-              method: 'POST',
-              headers: {
-                  'Content-Type': 'application/json',
-                  'x-goog-api-key': (import.meta as any).env?.VITE_GEMINI_API_KEY || ''
-              },
-              body: JSON.stringify({
-                  contents: [{
-                      parts: [{
-                          text: `Analyze this ${language} solution for the challenge "${currentChallenge?.title}". Provide a concise explanation (2-3 sentences) of the approach, algorithm used, and time/space complexity:\n\n${code}`
-                      }]
-                  }]
-              })
-          });
-          
-          const data = await response.json();
-          aiExplanation = data.candidates?.[0]?.content?.parts?.[0]?.text || `Completed ${currentChallenge?.title} solution in ${language}`;
-      } catch (error) {
-          console.error('Failed to generate AI explanation:', error);
-          aiExplanation = `Completed ${currentChallenge?.title} solution in ${language}`;
-      }
-      
-      // Create snippet from current code
-      const snippet: CodeSnippet = {
-          id: Date.now().toString(),
-          title: `✅ ${currentChallenge?.title || 'Challenge Solution'}`,
-          code: code,
-          language: language,
-          explanation: aiExplanation,
-          tags: [language, currentChallenge?.difficulty || 'custom', 'completed', activeProjectId || 'notebook'],
-          createdAt: new Date()
-      };
-      
-      // Add to local snippets (per-notebook)
-      setSnippets(prev => [snippet, ...prev]);
-      
-      showNotification('Challenge completed! Solution saved to this notebook.', 'success');
-      
-      // Clear state
-      setCodeCache({});
-      setCurrentChallenge(null);
-      setCode('');
-  };
 
-  const handleRunCode = async (testCases?: { id: string; input: string; expectedOutput: string }[]) => {
-      if (!code.trim()) {
+  const handleRunCode = async (testCases?: { id: string; input: string; expectedOutput: string }[], codeToRun?: string, languageToRun?: ProgrammingLanguage) => {
+      // Use provided code/language or fall back to main editor state
+      const codeContent = codeToRun || code;
+      const codeLanguage = languageToRun || language;
+      
+      if (!codeContent.trim()) {
           setEditorOutput("Error: No code to execute. Please write some code first.");
           return;
       }
@@ -1911,15 +2196,15 @@ ${conversationLog}
       
       try {
           // Language mismatch detection
-          const detectedLang = detectCodeLanguage(code);
-          if (detectedLang && detectedLang !== language) {
-              setEditorOutput(`⚠️ Language Mismatch Detected!\n\nEditor is set to: ${language.toUpperCase()}\nCode appears to be: ${detectedLang.toUpperCase()}\n\nPlease switch the editor language to ${detectedLang} or update your code.\n\nTip: Use the language dropdown in the toolbar to change languages.`);
+          const detectedLang = detectCodeLanguage(codeContent);
+          if (detectedLang && detectedLang !== codeLanguage) {
+              setEditorOutput(`⚠️ Language Mismatch Detected!\n\nEditor is set to: ${codeLanguage.toUpperCase()}\nCode appears to be: ${detectedLang.toUpperCase()}\n\nPlease switch the editor language to ${detectedLang} or update your code.\n\nTip: Use the language dropdown in the toolbar to change languages.`);
               setIsRunningCode(false);
               return;
           }
           
           // Basic syntax validation
-          const syntaxErrors = validateCodeSyntax(code, language);
+          const syntaxErrors = validateCodeSyntax(codeContent, codeLanguage);
           if (syntaxErrors.length > 0) {
               setEditorOutput(`Syntax Errors Found:\n${syntaxErrors.join('\n')}\n\nPlease fix these errors before running.`);
               setIsRunningCode(false);
@@ -1932,11 +2217,126 @@ ${conversationLog}
               expectedOutput: tc.expectedOutput
           }));
           
-          const result = await runCodeSimulation(code, language, executionMode, formattedTestCases);
+          const result = await runCodeSimulation(codeContent, codeLanguage, executionMode, formattedTestCases);
           setEditorOutput(result);
           
-          // Simple XP gain simulation
-          if (user) setUser({ ...user, xp: user.xp + 5 }); 
+          // ONLY validate if there's a current challenge (not for regular files)
+          if (currentChallenge && !isGuestMode && user) {
+              try {
+                  const { validateChallengeSolution } = await import('./services/geminiService');
+                  const validation = await validateChallengeSolution(
+                      currentChallenge,
+                      codeContent,
+                      codeLanguage,
+                      result
+                  );
+                  
+                  if (validation.isCorrect) {
+                      // Check if this is the first time solving (not a retry)
+                      const wasAlreadyCompleted = userChallenges.find(c => c.id === currentChallenge.id)?.completed;
+                      
+                      // Mark challenge as completed
+                      const updatedChallenges = userChallenges.map(c =>
+                          c.id === currentChallenge.id ? { ...c, completed: true } : c
+                      );
+                      setUserChallenges(updatedChallenges);
+                      
+                      // Calculate score based on difficulty (only on first completion)
+                      let scoreGain = 0;
+                      if (!wasAlreadyCompleted) {
+                          switch (currentChallenge.difficulty) {
+                              case 'Easy':
+                                  scoreGain = 10;
+                                  break;
+                              case 'Medium':
+                                  scoreGain = 30;
+                                  break;
+                              case 'Hard':
+                                  scoreGain = 60;
+                                  break;
+                              default:
+                                  scoreGain = 10;
+                          }
+                      }
+                      
+                      // Update user impact score (only if first completion)
+                      if (scoreGain > 0 && user) {
+                          setUser({ 
+                              ...user, 
+                              xp: user.xp + scoreGain,
+                              problemsSolvedEasy: currentChallenge.difficulty === 'Easy' ? user.problemsSolvedEasy + 1 : user.problemsSolvedEasy,
+                              problemsSolvedMedium: currentChallenge.difficulty === 'Medium' ? user.problemsSolvedMedium + 1 : user.problemsSolvedMedium,
+                              problemsSolvedHard: currentChallenge.difficulty === 'Hard' ? user.problemsSolvedHard + 1 : user.problemsSolvedHard
+                          });
+
+                          // Log problem to database for calendar tracking and update impact score
+                          try {
+                              const response = await apiService.logProblem(user.id, currentChallenge.difficulty);
+                              // Update user state with the response from server to ensure consistency
+                              if (response) {
+                                  setUser({
+                                      ...user,
+                                      xp: user.xp + scoreGain,
+                                      problemsSolvedEasy: response.problemsSolvedEasy || user.problemsSolvedEasy,
+                                      problemsSolvedMedium: response.problemsSolvedMedium || user.problemsSolvedMedium,
+                                      problemsSolvedHard: response.problemsSolvedHard || user.problemsSolvedHard
+                                  });
+                              }
+                          } catch (error) {
+                              console.error('Failed to log problem:', error);
+                          }
+                      }
+                      
+                      // Save to snippets (only on first completion)
+                      if (!wasAlreadyCompleted) {
+                          const newSnippet: CodeSnippet = {
+                              id: Date.now().toString(),
+                              title: currentChallenge.title,
+                              code: codeContent,
+                              language: codeLanguage,
+                              explanation: `Challenge Solution: ${currentChallenge.title}\n\nDifficulty: ${currentChallenge.difficulty}\n\nDescription: ${currentChallenge.description}`,
+                              tags: ['challenge', currentChallenge.difficulty.toLowerCase()],
+                              createdAt: new Date(),
+                              complexity: `Score: +${scoreGain} points`
+                          };
+                          
+                          setSnippets(prev => [newSnippet, ...prev]);
+                          
+                          // Save to database
+                          if (!isGuestMode && user) {
+                              try {
+                                  await apiService.saveSnippet(activeProjectId, newSnippet);
+                              } catch (error) {
+                                  console.error('Failed to save snippet:', error);
+                              }
+                          }
+                      }
+                      
+                      // Show success notification ONLY for correct solutions
+                      const messageText = wasAlreadyCompleted 
+                          ? `✅ Challenge Completed Again! ${validation.feedback}`
+                          : `✅ Challenge Completed! +${scoreGain} points! ${validation.feedback}`;
+                      showNotification(messageText, 'success');
+                      
+                      // Add message to chat
+                      setMessages(prev => [...prev, {
+                          id: Date.now().toString(),
+                          role: MessageRole.MODEL,
+                          text: wasAlreadyCompleted
+                              ? `🎉 Great job solving "${currentChallenge.title}" again!\n\n${validation.feedback}\n\nYour solution has been saved.`
+                              : `🎉 Excellent! You've successfully completed the "${currentChallenge.title}" challenge!\n\n+${scoreGain} points added to your impact score!\n\n${validation.feedback}\n\nYour solution has been saved to snippets. Great job!`,
+                          timestamp: new Date()
+                      }]);
+                  }
+                  // NO message or notification for incorrect solutions - user can see output and try again
+              } catch (error) {
+                  console.error('Challenge validation error:', error);
+                  // Don't show error to user, just log it
+              }
+          }
+          
+          // Simple XP gain simulation for non-challenge code
+          if (user && !currentChallenge) setUser({ ...user, xp: user.xp + 5 }); 
       } catch (e: any) {
           setEditorOutput(`Execution Error: ${e.message || 'AI could not process code. Check your syntax and try again.'}`);
       } finally {
@@ -2075,6 +2475,41 @@ ${conversationLog}
       );
   };
 
+  // Create a new file in the editor from code provided by AI
+  const createFileFromCode = (codeContent: string, fileName: string, fileLanguage: ProgrammingLanguage = language) => {
+      const newFile: StudyFile = {
+          id: Date.now().toString(),
+          name: fileName,
+          type: fileLanguage,
+          size: (codeContent.length / 1024).toFixed(1) + ' KB',
+          content: codeContent,
+          uploadDate: new Date(),
+          isVirtual: true
+      };
+      
+      // Add to files list WITHOUT changing the main editor code
+      setFiles(prev => [...prev, newFile]);
+      
+      // Show notification with file name
+      showNotification(`Created new file: ${fileName}`, 'success');
+  };
+
+  // Extract code blocks from AI response and provide option to add to editor
+  const extractCodeFromMessage = (text: string): Array<{ code: string; language: string }> => {
+      const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+      const matches = [];
+      let match;
+      
+      while ((match = codeBlockRegex.exec(text)) !== null) {
+          matches.push({
+              language: match[1] || language,
+              code: match[2].trim()
+          });
+      }
+      
+      return matches;
+  };
+
   const handleDownloadProject = () => {
       const projectContent = `
 # TILA AI Notebook Export
@@ -2140,7 +2575,9 @@ ${code}
       
       if (activeChatId && messages.length > 0 && !isGuestMode && user && isValidMongoId(activeChatId)) {
           try {
+              console.log('Saving chat before switch:', { chatId: activeChatId, messageCount: messages.length });
               await apiService.updateChatHistory(activeChatId, messages);
+              console.log('Chat saved successfully');
           } catch (error) {
               console.error('Failed to save current chat:', error);
           }
@@ -2241,16 +2678,22 @@ ${code}
   
   useEffect(() => {
       if (!isGuestMode && user && activeChatId && messages.length > 0 && isValidMongoId(activeChatId)) {
+          console.log('Setting up auto-save for chat:', { chatId: activeChatId, messageCount: messages.length });
+          
           const autoSaveInterval = setInterval(async () => {
               try {
+                  console.log('Auto-saving chat:', { chatId: activeChatId, messageCount: messages.length });
                   await apiService.updateChatHistory(activeChatId, messages);
-                  console.log('Chat auto-saved');
+                  console.log('Chat auto-saved successfully');
               } catch (error) {
                   console.error('Auto-save failed:', error);
               }
           }, 30000); // 30 seconds
           
-          return () => clearInterval(autoSaveInterval);
+          return () => {
+              console.log('Clearing auto-save interval for chat:', activeChatId);
+              clearInterval(autoSaveInterval);
+          };
       }
   }, [isGuestMode, user, activeChatId, messages]);
   
@@ -2265,6 +2708,7 @@ ${code}
                       code,
                       language,
                       snippets,
+                      editorFiles: files, // Save editor files to database
                       challenges: userChallenges,
                       roadmaps: userRoadmaps,
                       lastEdited: new Date()
@@ -2290,7 +2734,13 @@ ${code}
     setIsLoading(true);
 
     try {
-      const response = await generateDevResponse(textToSend, mode, explanationStyle, code, language, files);
+      // Convert messages to format expected by geminiService
+      const chatHistory = messages.map(msg => ({
+        role: msg.role === MessageRole.USER ? 'user' : 'assistant',
+        text: msg.text
+      }));
+      
+      const response = await generateDevResponse(textToSend, mode, explanationStyle, code, language, files, chatHistory, files);
       
       const codeBlockRegex = /```[\s\S]*?```/g;
       const codeMatches = response.text.match(codeBlockRegex);
@@ -2365,22 +2815,8 @@ ${code}
           }
       }
       
-      // Auto-extract code snippets and save to backend
-      if (codeToStream) {
-           const snippet = {
-               id: Date.now().toString(),
-               title: "AI Suggestion",
-               code: codeToStream, 
-               language: language,
-               explanation: response.text.substring(0, 100),
-               tags: ['AI-GENERATED'],
-               createdAt: new Date()
-           };
-           setSnippets(prev => [...prev, snippet]);
-           
-           // Note: Snippets are now saved per-notebook in the project itself via handleSaveSnippet
-           // No need to save to global backend - this ensures per-notebook isolation
-      }
+      // Note: Snippets are now saved manually via handleSaveSnippet or when completing challenges
+      // No auto-save from AI responses to prevent cluttering the snippets library
 
     } catch (error) {
        console.error(error);
@@ -2698,8 +3134,8 @@ public:
   };
   
   // Save code snippet
-  const handleSaveSnippet = async () => {
-      if (!code.trim()) {
+  const handleSaveSnippet = async (codeToSave: string, languageToSave: ProgrammingLanguage) => {
+      if (!codeToSave.trim()) {
           showNotification('No code to save. Write some code first!', 'warning');
           return;
       }
@@ -2723,26 +3159,26 @@ public:
                       body: JSON.stringify({
                           contents: [{
                               parts: [{
-                                  text: `Analyze this ${language} code and provide a concise explanation (2-3 sentences) of what it does, its purpose, and key concepts used:\n\n${code}`
+                                  text: `Analyze this ${languageToSave} code and provide a concise explanation (2-3 sentences) of what it does, its purpose, and key concepts used:\n\n${codeToSave}`
                               }]
                           }]
                       })
                   });
                   
                   const data = await response.json();
-                  aiExplanation = data.candidates?.[0]?.content?.parts?.[0]?.text || `${language} code snippet saved from editor`;
+                  aiExplanation = data.candidates?.[0]?.content?.parts?.[0]?.text || `${languageToSave} code snippet saved from editor`;
               } catch (error) {
                   console.error('Failed to generate AI explanation:', error);
-                  aiExplanation = `${language} code snippet saved from editor on ${new Date().toLocaleString()}`;
+                  aiExplanation = `${languageToSave} code snippet saved from editor on ${new Date().toLocaleString()}`;
               }
               
               const snippet: CodeSnippet = {
                   id: Date.now().toString(),
                   title: name,
-                  code: code,
-                  language: language,
+                  code: codeToSave,
+                  language: languageToSave,
                   explanation: aiExplanation,
-                  tags: [language, currentChallenge?.title || 'custom', activeProjectId || 'notebook'],
+                  tags: [languageToSave, currentChallenge?.title || 'custom', activeProjectId || 'notebook'],
                   createdAt: new Date()
               };
               
@@ -2756,6 +3192,19 @@ public:
                           ? { ...p, snippets: [snippet, ...(p.snippets || [])], lastEdited: new Date() }
                           : p
                   ));
+                  
+                  // Save to database immediately
+                  if (!isGuestMode) {
+                      try {
+                          await apiService.updateProject(activeProjectId, {
+                              snippets: [snippet, ...(snippets || [])],
+                              lastEdited: new Date()
+                          });
+                      } catch (error) {
+                          console.error('Failed to save snippet to database:', error);
+                          showNotification('Snippet saved locally but failed to sync to database', 'warning');
+                      }
+                  }
               }
               
               showNotification('Snippet saved to this notebook!', 'success');
@@ -2766,7 +3215,8 @@ public:
 
   const handleDeleteSnippet = async (id: string) => {
       // Remove from local state
-      setSnippets(s => s.filter(x => x.id !== id));
+      const updatedSnippets = snippets.filter(x => x.id !== id);
+      setSnippets(updatedSnippets);
       
       // Immediately update the project to ensure per-notebook isolation
       if (activeProjectId) {
@@ -2775,6 +3225,19 @@ public:
                   ? { ...p, snippets: (p.snippets || []).filter(s => s.id !== id), lastEdited: new Date() }
                   : p
           ));
+          
+          // Save to database immediately
+          if (!isGuestMode) {
+              try {
+                  await apiService.updateProject(activeProjectId, {
+                      snippets: updatedSnippets,
+                      lastEdited: new Date()
+                  });
+              } catch (error) {
+                  console.error('Failed to delete snippet from database:', error);
+                  showNotification('Snippet deleted locally but failed to sync to database', 'warning');
+              }
+          }
       }
       
       showNotification('Snippet deleted from this notebook!', 'success');
@@ -2782,7 +3245,8 @@ public:
 
   const handleAddSnippetFromCommunity = async (snippet: any) => {
       const newSnippet = { ...snippet, id: Date.now().toString(), createdAt: new Date() };
-      setSnippets(prev => [newSnippet, ...prev]);
+      const updatedSnippets = [newSnippet, ...snippets];
+      setSnippets(updatedSnippets);
       
       // Immediately update the project to ensure per-notebook isolation
       if (activeProjectId) {
@@ -2791,6 +3255,19 @@ public:
                   ? { ...p, snippets: [newSnippet, ...(p.snippets || [])], lastEdited: new Date() }
                   : p
           ));
+          
+          // Save to database immediately
+          if (!isGuestMode) {
+              try {
+                  await apiService.updateProject(activeProjectId, {
+                      snippets: updatedSnippets,
+                      lastEdited: new Date()
+                  });
+              } catch (error) {
+                  console.error('Failed to add snippet to database:', error);
+                  showNotification('Snippet added locally but failed to sync to database', 'warning');
+              }
+          }
       }
       
       showNotification('Snippet added to this notebook!', 'success');
@@ -2830,6 +3307,34 @@ public:
       }
   };
 
+  const handleSaveChallenges = async (newChallenges: CodingChallenge[]) => {
+      // Add to current notebook's challenges (per-notebook isolation)
+      const updatedChallenges = [...userChallenges, ...newChallenges];
+      setUserChallenges(updatedChallenges);
+      
+      // Update the project with new challenges
+      if (activeProjectId) {
+          setProjects(prev => prev.map(p => 
+              p.id === activeProjectId 
+                  ? { ...p, challenges: [...((p as any).challenges || []), ...newChallenges], lastEdited: new Date() }
+                  : p
+          ));
+          
+          // Save to database immediately
+          if (!isGuestMode) {
+              try {
+                  await apiService.updateProject(activeProjectId, {
+                      challenges: updatedChallenges,
+                      lastEdited: new Date()
+                  });
+              } catch (error) {
+                  console.error('Failed to save challenges to database:', error);
+                  showNotification('Challenges saved locally but failed to sync to database', 'warning');
+              }
+          }
+      }
+  };
+
   const handleSendToTutor = (nodeLabel: string) => {
       setViewState(ViewState.IDE);
       setInput(`Teach me about ${nodeLabel}. Explain the key concepts step by step.`);
@@ -2839,17 +3344,48 @@ public:
       }, 100);
   };
 
-  const handleSaveRoadmap = (roadmap: any) => {
-      // Add to current notebook's roadmaps (per-notebook isolation)
-      setUserRoadmaps(prev => [...prev, roadmap]);
-      
-      // Update the project with new roadmap
-      if (activeProjectId) {
-          setProjects(prev => prev.map(p => 
-              p.id === activeProjectId 
-                  ? { ...p, roadmaps: [...((p as any).roadmaps || []), roadmap], lastEdited: new Date() }
-                  : p
-          ));
+  const handleSaveRoadmap = async (roadmap: any) => {
+      try {
+          if (isGuestMode) {
+              showNotification('Sign in to save roadmaps', 'info');
+              return;
+          }
+
+          if (!activeProjectId) {
+              showNotification('Please select a notebook first', 'warning');
+              return;
+          }
+
+          // Save directly to roadmaps collection via API with projectId
+          const roadmapData = {
+              topic: roadmap.topic || 'Untitled Roadmap',
+              nodes: roadmap.nodes || [],
+              links: roadmap.links || []
+          };
+
+          console.log('Saving roadmap to database for project:', activeProjectId, 'data:', roadmapData);
+          
+          const savedRoadmap = await apiService.createRoadmap(
+              activeProjectId,
+              roadmapData.topic,
+              roadmapData.nodes,
+              roadmapData.links
+          );
+
+          console.log('Roadmap saved successfully:', savedRoadmap);
+          console.log('Current userRoadmaps before update:', userRoadmaps);
+          
+          // Update local state
+          setUserRoadmaps(prev => {
+              const updated = [...prev, savedRoadmap];
+              console.log('Updated userRoadmaps:', updated);
+              return updated;
+          });
+          
+          showNotification('Roadmap saved successfully!', 'success');
+      } catch (error) {
+          console.error('Failed to save roadmap:', error);
+          showNotification('Failed to save roadmap', 'error');
       }
   };
 
@@ -2872,11 +3408,11 @@ public:
   }
 
   if (authStage === AuthStage.LOGIN) {
-      return <LoginScreen onLogin={handleLogin} onRegister={() => { setAuthStage(AuthStage.REGISTER); setAuthError(''); }} onBack={() => { setAuthStage(AuthStage.LANDING); setAuthError(''); }} error={authError} />;
+      return <LoginScreen onLogin={handleLogin} onRegister={() => { setAuthStage(AuthStage.REGISTER); setAuthError(''); }} onBack={() => { setAuthStage(AuthStage.LANDING); setAuthError(''); }} error={authError} isLoading={isAuthLoading} />;
   }
 
   if (authStage === AuthStage.REGISTER) {
-      return <RegisterScreen onRegister={handleRegister} onLogin={() => { setAuthStage(AuthStage.LOGIN); setAuthError(''); }} onBack={() => { setAuthStage(AuthStage.LANDING); setAuthError(''); }} error={authError} />;
+      return <RegisterScreen onRegister={handleRegister} onLogin={() => { setAuthStage(AuthStage.LOGIN); setAuthError(''); }} onBack={() => { setAuthStage(AuthStage.LANDING); setAuthError(''); }} error={authError} isLoading={isAuthLoading} />;
   }
 
   if (authStage === AuthStage.DASHBOARD_SELECTION && user) {
@@ -2917,6 +3453,7 @@ public:
           confirmText={confirmModal.confirmText || 'Confirm'}
           cancelText={confirmModal.cancelText || 'Cancel'}
           isDanger={confirmModal.isDanger}
+          isLoading={confirmModal.isLoading}
         />
       )}
       
@@ -2933,8 +3470,16 @@ public:
       
 
       
-      {/* High Z-Index for Profile Modal to overlay everything */}
-      {showProfile && user && <UserProfileModal user={user} onClose={() => setShowProfile(false)} isGuestMode={isGuestMode} />}
+      {/* Profile Page - Full Screen */}
+      {showProfilePage && user && (
+          <ProfilePage user={user} onClose={() => setShowProfilePage(false)} showNotification={showNotification} setUser={setUser} />
+      )}
+      
+      {/* Main App - Hidden when showing profile */}
+      {!showProfilePage && (
+          <>
+      {/* Profile Modal - Quick View */}
+      {showProfile && user && <UserProfileModal user={user} onClose={() => setShowProfile(false)} isGuestMode={isGuestMode} onViewFullProfile={() => { setShowProfile(false); setShowProfilePage(true); }} />}
       
       <Sidebar 
           files={files} 
@@ -2944,7 +3489,6 @@ public:
           setViewState={setViewState} 
           user={user} 
           onLogout={handleLogout} 
-          onGenerateSyllabus={handleGenerateSyllabus}
           onShowProfile={() => setShowProfile(true)}
           onBackToDashboard={handleBackToDashboard}
           onDownloadProject={handleDownloadProject}
@@ -2978,7 +3522,6 @@ public:
             setExecutionMode={setExecutionMode}
             onLanguageChange={handleLanguageChange}
             onSaveSnippet={handleSaveSnippet}
-            onChallengeComplete={handleChallengeComplete}
             chatSessions={chatSessions}
             activeChatId={activeChatId}
             onNewChat={createNewChat}
@@ -2988,13 +3531,21 @@ public:
             onDeleteMessage={(messageId) => setMessages(prev => prev.filter(m => m.id !== messageId))}
             onDeleteChat={deleteChatSession}
             onRenameChat={renameChatSession}
+            onCreateFileFromCode={createFileFromCode}
+            editorFiles={files}
+            onRemoveFile={(fileId) => setFiles(f => f.filter(file => file.id !== fileId))}
+            onAddFile={(file) => setFiles(f => [...f, file])}
+            onUpdateFile={(fileId, updates) => setFiles(f => f.map(file => file.id === fileId ? { ...file, ...updates } : file))}
           />
         )}
-        {viewState === ViewState.CHALLENGES && <ChallengesView files={files} onXPChange={() => {}} onLoadChallenge={loadChallenge} isGuestMode={isGuestMode} userChallenges={userChallenges} onRefresh={() => {/* Per-notebook isolation: no global refresh */}} onShowNotification={showNotification} />}
+        {viewState === ViewState.CHALLENGES && <ChallengesView files={files} onXPChange={() => {}} onLoadChallenge={loadChallenge} isGuestMode={isGuestMode} userChallenges={userChallenges} onRefresh={() => {/* Per-notebook isolation: no global refresh */}} onShowNotification={showNotification} onSaveChallenges={handleSaveChallenges} />}
         {viewState === ViewState.ROADMAP && <RoadmapView files={files} isGuestMode={isGuestMode} onGenerateChallengesForNode={handleGenerateChallengesForNode} onSendToTutor={handleSendToTutor} userRoadmaps={userRoadmaps} onRefresh={() => {/* Per-notebook isolation: no global refresh */}} onShowNotification={showNotification} onSaveRoadmap={handleSaveRoadmap} />}
         {viewState === ViewState.SNIPPETS && <SnippetsLibrary snippets={snippets} onDelete={handleDeleteSnippet} onAddToEditor={(snippet) => { setCode(snippet.code); setLanguage(snippet.language); setViewState(ViewState.IDE); showNotification('Code loaded into editor', 'success'); }} onAskTutor={(snippet) => { setViewState(ViewState.IDE); setInput(`Explain this ${snippet.language} code:\n\n${snippet.code}`); }} onGenerateChallenges={(snippet) => { handleGenerateChallengesForNode(snippet.title || 'Code Snippet'); }} />}
+        {viewState === ViewState.FILES && <FilesLibrary files={files} onDelete={(id) => setFiles(f => f.filter(file => file.id !== id))} onOpenInEditor={(file) => { setCode(file.content); setLanguage(file.type as ProgrammingLanguage); setViewState(ViewState.IDE); showNotification(`Opened ${file.name} in editor`, 'success'); }} />}
         {viewState === ViewState.COMMUNITY && <CommunityView user={user} isGuestMode={isGuestMode} onShowNotification={showNotification} onAddSnippet={handleAddSnippetFromCommunity} />}
       </main>
+          </>
+      )}
     </div>
   );
 }
