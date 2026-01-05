@@ -202,6 +202,12 @@ router.get('/public/:username/:shareCode?', async (req, res) => {
       return res.status(403).json({ error: 'Invalid share code' });
     }
 
+    // Auto-generate share code if user doesn't have one
+    if (!user.shareCode) {
+      user.shareCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+      await user.save();
+    }
+
     // Calculate impact score
     const impactScore = (user.problemsSolvedEasy * 10) + (user.problemsSolvedMedium * 30) + (user.problemsSolvedHard * 60);
     

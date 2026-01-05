@@ -24,6 +24,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, onClose, showNot
     const [settingsLoading, setSettingsLoading] = useState(false);
     const [viewingUser, setViewingUser] = useState<any>(null);
     const [shareUrl, setShareUrl] = useState('');
+    const [shareButtonCopied, setShareButtonCopied] = useState(false);
+    const [viewedUserShareCopied, setViewedUserShareCopied] = useState(false);
 
     useEffect(() => {
         const fetchProfileData = async () => {
@@ -73,11 +75,14 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, onClose, showNot
         try {
             // Fetch public profile using username (no share code needed for viewing from leaderboard)
             const userProfileRes = await apiService.getPublicProfile(userName);
+            console.log('[ProfilePage] Fetched user profile:', userProfileRes);
             setViewingUser({ ...userProfileRes, id: userId, name: userName });
             
             // Use the share code from the response to generate the shareable link
             const shareCode = userProfileRes.shareCode || '';
-            const url = `${window.location.origin}/profile/${userName}/${shareCode}`;
+            console.log('[ProfilePage] Share code:', shareCode);
+            const url = `${window.location.origin}/profile/${encodeURIComponent(userName)}/${shareCode}`;
+            console.log('[ProfilePage] Generated URL:', url);
             setShareUrl(url);
         } catch (error) {
             console.error('Error fetching user profile:', error);
@@ -87,7 +92,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, onClose, showNot
 
     const copyShareUrl = () => {
         navigator.clipboard.writeText(shareUrl);
+        setViewedUserShareCopied(true);
         showNotification('Profile link copied to clipboard', 'success');
+        setTimeout(() => setViewedUserShareCopied(false), 2000);
     };
 
     const handleRefreshProfile = async () => {
@@ -473,17 +480,23 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, onClose, showNot
                                                 onClick={async () => {
                                                     try {
                                                         const shareRes = await apiService.generateShareCode();
-                                                        const url = `${window.location.origin}/profile/${user.name}/${shareRes.shareCode}`;
+                                                        const url = `${window.location.origin}/profile/${encodeURIComponent(user.name)}/${shareRes.shareCode}`;
                                                         navigator.clipboard.writeText(url);
+                                                        setShareButtonCopied(true);
                                                         showNotification('Profile link copied to clipboard', 'success');
+                                                        setTimeout(() => setShareButtonCopied(false), 2000);
                                                     } catch (error) {
                                                         console.error('Error generating share code:', error);
                                                         showNotification('Failed to generate share link', 'error');
                                                     }
                                                 }}
-                                                className="w-full px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded text-xs font-semibold transition-all"
+                                                className={`w-full px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                                                    shareButtonCopied
+                                                        ? 'bg-green-600 hover:bg-green-500 text-white'
+                                                        : 'bg-violet-600 hover:bg-violet-500 text-white'
+                                                }`}
                                             >
-                                                Generate & Copy Link
+                                                {shareButtonCopied ? '✓ Copied!' : 'Generate & Copy Link'}
                                             </button>
                                         </div>
                                     </div>
@@ -512,10 +525,14 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, onClose, showNot
                             <div className="flex items-center gap-2">
                                 <button
                                     onClick={copyShareUrl}
-                                    className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded text-xs font-semibold transition-all"
+                                    className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                                        viewedUserShareCopied
+                                            ? 'bg-green-600 hover:bg-green-500 text-white'
+                                            : 'bg-violet-600 hover:bg-violet-500 text-white'
+                                    }`}
                                     title="Copy shareable link"
                                 >
-                                    Share
+                                    {viewedUserShareCopied ? '✓ Copied!' : 'Share'}
                                 </button>
                                 <button
                                     onClick={() => setViewingUser(null)}

@@ -20,11 +20,15 @@ router.post('/register', async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // Generate share code
+    const shareCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+
     // Create user
     const user = new User({
       name,
       email,
-      password: hashedPassword
+      password: hashedPassword,
+      shareCode
     });
 
     await user.save();
